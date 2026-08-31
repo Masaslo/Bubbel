@@ -20,7 +20,7 @@ De MVP is voor één gebruiker en één bestaand Android-toestel. Bedrade, USB- 
 - Startscherm: één grote aan/uitknop, actieve status en huidige audioverbinding.
 - Instellingen: filterstand, microfoonkeuze (Automatisch, Telefoon, Headset) en uitgangsvolume.
 - Laat Android de audio-uitgang kiezen. Toon waarschuwingen bij Bluetooth-latency en mogelijk rondzingen via de telefoonspeaker, maar blokkeer deze routes niet.
-- Draai tijdens gebruik als foreground service (met `foregroundServiceType="microphone"` + `FOREGROUND_SERVICE_MICROPHONE`, vereist op Android 14+), zodat een les van minimaal 90 minuten met uitgeschakeld scherm mogelijk is.
+- Draai tijdens gebruik als foreground service (met `foregroundServiceType="microphone"` + `FOREGROUND_SERVICE_MICROPHONE`, vereist op Android 14+), zodat Bubbel actief blijft wanneer de gebruiker naar een andere app schakelt, het scherm uitschakelt of een les van minimaal 90 minuten duurt.
 - Vraag alleen microfoon- en foreground-service-permissies. Voeg geen internetpermissie, accounts, analytics of cloudintegraties toe.
 - Bewaar uitsluitend instellingen; nooit audio, tijdelijke audiofragmenten of transcripties.
 - Behandel de voortijdig aangemaakte scaffold als niet-bindend: controleer of vervang deze tijdens implementatie op basis van dit plan.
@@ -31,6 +31,7 @@ De MVP is voor één gebruiker en één bestaand Android-toestel. Bedrade, USB- 
 - Bedraad/USB: streef naar maximaal 50 ms mediane round-trip latency en geen merkbare echo bij afgesloten oortjes of koptelefoon.
 - Bluetooth: meet en toon de werkelijke situatie, maar hanteer geen harde latencygarantie.
 - Laat Bubbel minimaal 90 minuten onafgebroken draaien zonder crash of audiostream die stilvalt.
+- Controleer dat audioverwerking blijft werken nadat de gebruiker naar een andere app schakelt en daarna terugkeert.
 - Test docentenspraak, zachte en verre spraak, meerdere stemmen en triggers zoals tikken, typen, schuiven, kauw-/mondgeluiden, ventilatie en verkeer.
 - De persoonlijke proef slaagt wanneer:
   - gesproken uitleg verstaanbaar blijft;
