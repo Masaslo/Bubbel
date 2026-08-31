@@ -4,16 +4,16 @@
 
 **Goal:** Bouw Bubbel v1 als volledig lokale Android-luisterketen die alle spraak behoudt, niet-spraak dempt en bij iedere fout stil en veilig stopt.
 
-**Architecture:** Een native C++-engine bezit outputgestuurde Oboe full-duplex streams. De realtime callback verplaatst alleen vooraf gealloceerde samples; een aparte worker voert 512-sample DeepFilterNet3-inference uit via ONNX Runtime. Een niet-geëxporteerde Kotlin foreground service bezit de engine en publiceert de werkelijke sessiestatus aan de Compose-UI.
+**Architecture:** Een native C++-engine bezit outputgestuurde Oboe full-duplex streams. De realtime callback verplaatst alleen vooraf gealloceerde samples; een aparte worker voert officiële DeepFilterNet3-verwerking uit in 480-sample hops via een gepinde Rust `libDF`/Tract-library achter een smalle C ABI. Een niet-geëxporteerde Kotlin foreground service bezit de engine en publiceert de werkelijke sessiestatus aan de Compose-UI.
 
-**Tech Stack:** Kotlin 2.2, Jetpack Compose, Android foreground services, C++17, CMake, Oboe 1.10, ONNX Runtime Android 1.29, JUnit 4, AndroidX instrumentation.
+**Tech Stack:** Kotlin 2.2, Jetpack Compose, Android foreground services, C++17, CMake, Oboe 1.10, Rust, upstream DeepFilterNet `libDF`/Tract, JUnit 4, AndroidX instrumentation.
 
 **Spec:** `C:/Users/Floris/.codex/attachments/2a63ea66-6b19-4e6e-8e06-30de274ca6ad/pasted-text.txt`
 
 ## Global Constraints
 
 - Alle audioverwerking is lokaal; voeg geen `INTERNET`-permission, netwerkcode, audio-opslag, tijdelijke PCM-bestanden of transcripties toe.
-- Verwerk het model in blokken van exact 512 mono `float32`-samples op 48 kHz.
+- Verwerk het officiële model in hops van exact 480 mono `float32`-samples op 48 kHz (`fft_size=960`, `hop_size=480`).
 - Doe nooit allocaties, mutexgebruik, logging, JNI-calls of model-inference vanuit een Oboe-callback.
 - Een lege outputbuffer wordt stilte; ongefilterde audio is nooit een foutfallback.
 - Stop met `ProcessingTooSlow` na drie opeenvolgende gemiste modeldeadlines of 250 ms zonder geldige output, afhankelijk van wat eerst komt.
@@ -38,42 +38,49 @@
 - Modify: `app/build.gradle.kts`
 
 **Interfaces:**
-- Produces: `SpscRingBuffer<float>`, `FrameAssembler<512>`, `FilterProfile { Natural, Balanced, Strong }`, `ProfileMixer::process(dry, enhanced, output, count)`, `DeadlineWatchdog::recordFrame(bool, int64_t)`.
+- Produces: `SpscRingBuffer<float>`, generic `FrameAssembler<N>` (used as `FrameAssembler<480>` from Task 2 onward), `FilterProfile { Natural, Balanced, Strong }`, `ProfileMixer::process(dry, enhanced, output, count)`, `DeadlineWatchdog::recordFrame(bool, int64_t)`.
 - `Natural` dry floor is `10^(-12/20)`, `Balanced` dry floor is `10^(-24/20)`, `Strong` dry floor is `0`; ramps are exactly 2400 samples at 48 kHz.
 - `DeadlineWatchdog` returns `ProcessingTooSlow` on the third consecutive miss or elapsed invalid-output time `>= 250 ms`.
 
-- [ ] Write Catch2-free native assertions for ring wrap-around, bounded overrun/underrun, arbitrary callback framing to 512, exact profile endpoints, 2400-sample ramps and both watchdog limits.
+- [ ] Write Catch2-free native assertions for ring wrap-around, bounded overrun/underrun, arbitrary callback framing, exact profile endpoints, 2400-sample ramps and both watchdog limits.
 - [ ] Run the native test target and verify it fails because the headers do not exist.
 - [ ] Implement only the preallocated, non-blocking primitives required by the tests; no Android or ONNX dependencies in these units.
 - [ ] Run the native tests and `gradlew test`; both must pass.
 - [ ] Commit with message `feat: add realtime audio primitives`.
 
-### Task 2: Frozen model package and inference boundary
+### Task 2: Official DeepFilterNet3 package and libDF inference boundary
 
 **Files:**
-- Create: `app/src/main/assets/models/deepfilternet3/model.onnx`
+- Create: `app/src/main/assets/models/deepfilternet3/DeepFilterNet3_onnx.tar.gz`
 - Create: `app/src/main/assets/models/deepfilternet3/metadata.json`
-- Create: `app/src/main/assets/models/deepfilternet3/initial_state.bin`
 - Create: `app/src/main/assets/models/deepfilternet3/LICENSES.md`
 - Create: `app/src/main/assets/models/deepfilternet3/SHA256SUMS`
+- Create: `app/src/main/rust/Cargo.toml`
+- Create: `app/src/main/rust/Cargo.lock`
+- Create: `app/src/main/rust/src/lib.rs`
+- Create: `app/src/main/cpp/model/LibDfApi.h`
 - Create: `app/src/test/resources/deepfilternet3/golden_input_f32le.bin`
 - Create: `app/src/test/resources/deepfilternet3/golden_output_f32le.bin`
 - Create: `app/src/main/cpp/model/VoiceFilter.h`
-- Create: `app/src/main/cpp/model/OnnxVoiceFilter.cpp`
+- Create: `app/src/main/cpp/model/LibDfVoiceFilter.cpp`
 - Create: `app/src/test/cpp/VoiceFilterTests.cpp`
 - Modify: `app/src/main/cpp/CMakeLists.txt`
+- Modify: `app/src/test/cpp/AudioCoreTests.cpp`
+- Modify: `app/build.gradle.kts`
 
 **Interfaces:**
-- Produces: `VoiceFilter::initialize(ModelFiles)`, `VoiceFilter::reset()`, `VoiceFilter::process(const float input[512], float output[512]) -> FilterResult`.
-- The adapter owns all recurrent tensors and exposes no ONNX objects to the audio callback.
-- `metadata.json` records source URL, upstream revision, license, tensor names/shapes, sample rate, frame size, preprocessing/postprocessing and whether reliable speech/LSNR output exists.
+- Produces: `VoiceFilter::initialize(ModelFiles)`, `VoiceFilter::reset()`, `VoiceFilter::process(const float input[480], float output[480]) -> FilterResult`.
+- The Rust library owns STFT/iSTFT, Tract execution and every temporal/model buffer; the C++ wrapper owns one opaque session handle and exposes no Rust/Tract objects to the audio callback.
+- `metadata.json` records the immutable upstream URL/revision, license, archive SHA-256, sample rate 48000, FFT size 960, hop size 480, lookahead and whether reliable speech/LSNR output is exposed.
 
-- [ ] Freeze a reproducible, redistributable streaming DeepFilterNet3 ONNX artifact and record independently computed SHA-256 values.
-- [ ] Generate one deterministic desktop golden vector and verify the test fails before the ONNX adapter is implemented.
-- [ ] Implement CPU inference first; enable XNNPACK only when session creation succeeds and keep NNAPI disabled unless device measurements are documented.
-- [ ] Reset every recurrent tensor to the packaged initial state on `reset()` and verify two sessions produce identical first-frame output.
-- [ ] Compare Android/native output to the golden output using the tolerance declared in metadata; run native tests and `gradlew test`.
-- [ ] Commit with message `feat: package DeepFilterNet voice filter`.
+- [ ] Replace the existing 512-specific framing assertions with 480-hop assertions and capture a failing test before changing production-facing frame constants.
+- [ ] Freeze the official `DeepFilterNet3_onnx.tar.gz` from upstream commit `d375b2d8309e0935d165700c91da9de862a99c31`; independently verify SHA-256 `c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616` and include the chosen upstream license text.
+- [ ] Build a minimal Rust `cdylib` for Android that wraps official `libDF`/Tract with opaque create/process/reset/destroy functions and catches Rust panics before they cross the C ABI.
+- [ ] Generate one deterministic golden vector with the pinned upstream desktop implementation and verify the Android/native comparison fails before the wrapper is implemented.
+- [ ] Make `reset()` recreate or fully reset every upstream analysis, synthesis and model buffer; verify two sessions produce identical first-hop output.
+- [ ] Compare Android output to the golden output using the tolerance declared in metadata; run Rust tests, native emulator tests and `gradlew test`.
+- [ ] Remove the unused ONNX Runtime Android dependency after the libDF route is linked successfully.
+- [ ] Commit with message `feat: integrate official DeepFilterNet voice filter`.
 
 ### Task 3: Oboe full-duplex engine and JNI bridge
 
@@ -91,7 +98,7 @@
 **Interfaces:**
 - Produces native events `Starting`, `Running(route)`, `Recovering(attempt)`, `Failed(reason)`, `Stopped` through a polling/control-thread bridge, never from the callback.
 - JNI methods: `nativeCreate(assetManager)`, `nativeStart(filterMode, inputPreference, outputGain)`, `nativeStop()`, `nativeSetFilterMode(mode)`, `nativePollEvent()`, `nativeDestroy()`.
-- The worker is the sole caller of `VoiceFilter` and writes exactly 512 filtered samples per successful frame.
+- The worker is the sole caller of `VoiceFilter` and writes exactly 480 filtered samples per successful hop.
 
 - [ ] Write tests around injected fake streams/filter/clock for output-before-input ordering, silence on underrun, channel duplication, worker framing, state reset and retry delays 100/250/500 ms.
 - [ ] Verify the tests fail before engine classes exist.
