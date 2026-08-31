@@ -6,7 +6,8 @@ Bubbel is een volledig lokale Android-app voor mensen met misofonie of andere au
 
 ## Status
 
-- **Fase:** planfase (MVP-ontwerp vastgelegd, nog geen app-code)
+- **Fase:** lokale Compose-UI-prototype; de audiofiltering is nog niet geïmplementeerd
+- **Homescreen:** geanimeerde stress-naar-rust-bubbel, bewegend geluidsveld en instellingen-dropdown
 - **Filterkern:** DeepFilterNet3 (besluit 2026-08-31)
 - **Plan:** [PLAN.md](PLAN.md) — volledige MVP-specificatie met test- en acceptatiecriteria
 

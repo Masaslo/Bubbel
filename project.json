@@ -19,9 +19,9 @@
     {
       "id": "repo-opzet",
       "title": "Repo-opzet en Android-projectstructuur",
-      "description": "README en LICENSE staan er; er is nog geen Android-code. Stack: Kotlin + Compose, C++-audiokern, Oboe/AAudio, ONNX Runtime Mobile met DeepFilterNet3-model. Initialiseer de app-structuur.",
-      "status": "planned",
-      "nextAction": "Android-projectstructuur initialiseren met Oboe + ONNX Runtime (DFN3)",
+      "description": "Kotlin/Compose-prototype staat met een Clean Architecture-basis (domain, data, presentation), een lokale aan/uitstatus, Oboe/AAudio als Prefab-afhankelijkheid en ONNX Runtime Mobile als Android-afhankelijkheid. De C++-audiobrug en het DeepFilterNet3-model horen bij de voice-isolation-fase.",
+      "status": "done",
+      "nextAction": null,
       "blockedReason": null
     },
     {
