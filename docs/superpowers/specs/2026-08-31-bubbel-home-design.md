@@ -15,7 +15,8 @@ Het scherm neemt de aangeleverde schets als bron: een warme, egale achtergrond m
 | Rol | Waarde | Gebruik |
 | --- | --- | --- |
 | Achtergrond | `#FFF3BD` | Volledig homescreen |
-| Bubbel | `#8EF58B` | Centrale aan/uitknop |
+| Inactieve bubbel | `#E98D88` | Gestresste centrale aan/uitknop |
+| Actieve bubbel | `#9AFA97` | Kalme centrale aan/uitknop |
 | Actieve ring | `#8E8AE8` | Pulserende statusring |
 | Instellingen | `#C8A96A` | Afgeronde tegel rechtsboven |
 | Icoon | `#171713` | Gezicht en tandwiel |
@@ -30,10 +31,10 @@ Alle app-kleuren worden centraal en semantisch gedefinieerd in `ui/theme/Color.k
 
 De centrale bubbel is de enige primaire actie en schakelt de luister-/filtermodus aan en uit.
 
-- **Inactief:** mintgroene bubbel met gezicht; geen ring.
+- **Inactief:** zachtrode, gestresste bubbel met schuine ogen en een golvende mond; geen ring.
 - **Activeren:** de lavendelkleurige ring groeit in circa 600 ms vanuit de bubbel en wordt daarna actief.
 - **Actief:** de ring herhaalt langzaam een rustige ademende cyclus van schaalvergroting en vervaging. De bubbel wordt subtiel frisser groen.
-- **Deactiveren:** de ring vervaagt en krimpt terug; de bubbel keert terug naar de inactieve kleur.
+- **Deactiveren:** de ring vervaagt en krimpt terug; de bubbel keert terug naar de zachtrode, gestresste inactieve staat.
 - **Instellingen:** de zandkleurige, afgeronde tegel rechtsboven opent de instellingenflow en toont alleen een tandwielicoon.
 
 De status wordt dus uitsluitend visueel getoond: er zijn geen labels, knoppen met tekst, banners of andere status-copy op het homescreen.
@@ -69,3 +70,7 @@ De knop blijft in het optische midden van het beschikbare scherm, ook met edge-t
 - Audioverwerking, permissies, foreground service en echte audioverbindingstatus.
 - Instellingeninhoud; alleen de navigatie-/interactiehaak hoort bij dit homescreen.
 - Tekstuele status of onboarding op het homescreen.
+
+## Ontwikkelkwaliteit en volgende ontwerpiteratie
+
+De schets legt de informatiehiërarchie en statussen vast, maar is geen pixel-perfect eindontwerp. De eerste werkende versie wordt op een fysiek Android-toestel beoordeeld op optische centrering, gelaatsuitdrukking, kleurcontrast, ringdikte, animatiesnelheid en haptische feedback. Bevindingen worden vastgelegd als gerichte verbeterpunten voordat de UI als visueel afgerond geldt. Daarbij blijft de kern behouden: één primaire bubbel, icon-only navigatie en geen visuele ruis.
