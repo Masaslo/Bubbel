@@ -20,6 +20,7 @@
 - Open output vóór input, gebruik de outputcallback als klok, vraag low-latency/exclusive aan en val terug op shared mode.
 - Recurrente modelstate is sessiegebonden en wordt gereset bij start, stop en routeherstel.
 - `Balanced` is standaard; profielwissels gebruiken een 50 ms ramp.
+- Pin de Rust-wrapper op toolchain 1.98.0 en pin `ndarray=0.15.6` plus alle gebruikte Tract-crates exact op `0.21.4`; nieuwere Tract 0.21.x-versies zijn niet broncompatibel met de gekozen DeepFilterNet-commit.
 - Start de microfoon-foreground-service alleen vanuit een zichtbare Activity nadat `RECORD_AUDIO` is verleend.
 - De UI is alleen actief wanneer de engine `Running` rapporteert.
 - Achtergrond, scherm-uit en een sessie van minimaal 90 minuten behoren tot de acceptatiecriteria.
@@ -71,11 +72,13 @@
 **Interfaces:**
 - Produces: `VoiceFilter::initialize(ModelFiles)`, `VoiceFilter::reset()`, `VoiceFilter::process(const float input[480], float output[480]) -> FilterResult`.
 - The Rust library owns STFT/iSTFT, Tract execution and every temporal/model buffer; the C++ wrapper owns one opaque session handle and exposes no Rust/Tract objects to the audio callback.
+- The Rust C ABI exposes opaque `open/process/reopen/close` operations returning integer status codes; every exported function validates pointers/lengths and catches panics. `reopen` constructs a completely new `DfTract` and is called only outside the realtime callback.
 - `metadata.json` records the immutable upstream URL/revision, license, archive SHA-256, sample rate 48000, FFT size 960, hop size 480, lookahead and whether reliable speech/LSNR output is exposed.
 
 - [ ] Replace the existing 512-specific framing assertions with 480-hop assertions and capture a failing test before changing production-facing frame constants.
 - [ ] Freeze the official `DeepFilterNet3_onnx.tar.gz` from upstream commit `d375b2d8309e0935d165700c91da9de862a99c31`; independently verify SHA-256 `c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616` and include the chosen upstream license text.
-- [ ] Build a minimal Rust `cdylib` for Android that wraps official `libDF`/Tract with opaque create/process/reset/destroy functions and catches Rust panics before they cross the C ABI.
+- [ ] Build a minimal Rust `cdylib` for Android that wraps official `libDF`/Tract with opaque `open/process/reopen/close` functions and catches Rust panics before they cross the C ABI; do not use upstream `capi.rs` or `df_process_frame_raw`.
+- [ ] Pin Rust 1.98.0, `ndarray=0.15.6`, `tract-core=0.21.4`, `tract-hir=0.21.4`, `tract-onnx=0.21.4` and `tract-pulse=0.21.4` in the wrapper manifest/lockfile; cross-build x86_64 and arm64 with NDK r28c/API 24.
 - [ ] Generate one deterministic golden vector with the pinned upstream desktop implementation and verify the Android/native comparison fails before the wrapper is implemented.
 - [ ] Make `reset()` recreate or fully reset every upstream analysis, synthesis and model buffer; verify two sessions produce identical first-hop output.
 - [ ] Compare Android output to the golden output using the tolerance declared in metadata; run Rust tests, native emulator tests and `gradlew test`.
