@@ -19,6 +19,13 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=c++_shared"
+                cppFlags += "-std=c++17"
+            }
+        }
     }
 
     buildTypes {
@@ -37,6 +44,12 @@ android {
     buildFeatures {
         compose = true
         prefab = true
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 }
 
