@@ -1,0 +1,20 @@
+name: Branch name check
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+jobs:
+  check-branch-name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR branch name
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          if ! [[ "$BRANCH" =~ ^(feature|docs|fix)/ ]]; then
+            echo "::error::Branch '$BRANCH' voldoet niet aan de naming convention."
+            echo "Gebruik een prefix: feature/, docs/ of fix/ (bijv. feature/voice-isolation)."
+            exit 1
+          fi
+          echo "Branch '$BRANCH' voldoet aan de naming convention."
