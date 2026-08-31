@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "bubbel",
+  "title": "Bubbel 🫧",
+  "description": "Android native app voor mensen met misofonie of andere auditieve aandoeningen: noise isolation die alle geluiden wegfiltert behalve de geselecteerde stem, plus witte-ruisgeneratie. Primair bedoeld voor gebruik in klaslokalen met draadloze microfoons. Volledig lokaal: geen internet, geen audio-opslag. Filterkern: DeepFilterNet3 (lokaal via ONNX Runtime Mobile/NNAPI).",
+  "status": "active",
+  "owner": null,
+  "priority": 0,
+  "suggestion": "Initialiseer de Android-projectstructuur (Kotlin/Compose + Oboe/AAudio + ONNX Runtime Mobile met DeepFilterNet3) en test eerst onbewerkte microfoon-doorvoer op het referentietoestel.",
+  "todos": [
+    {
+      "id": "library-validatie",
+      "title": "Voice-isolation-library valideren",
+      "description": "Besloten 2026-08-31 (Floris): DeepFilterNet3 wordt de filterkern (MIT/Apache-2.0, bewezen op Android via ONNX Runtime/NNAPI, veel sterker tegen niet-spraak-triggers dan RNNoise). Oboe/AAudio (Google, Apache-2.0) blijft de audio-laag. RNNoise/rnnoise-nu afgevallen als primair filter; geen spike nodig. Kosten DFN3 (CPU/batterij, +20-50ms latency) worden in de implementatietest gemeten.",
+      "status": "done",
+      "nextAction": null,
+      "blockedReason": null
+    },
+    {
+      "id": "repo-opzet",
+      "title": "Repo-opzet en Android-projectstructuur",
+      "description": "README en LICENSE staan er; er is nog geen Android-code. Stack: Kotlin + Compose, C++-audiokern, Oboe/AAudio, ONNX Runtime Mobile met DeepFilterNet3-model. Initialiseer de app-structuur.",
+      "status": "planned",
+      "nextAction": "Android-projectstructuur initialiseren met Oboe + ONNX Runtime (DFN3)",
+      "blockedReason": null
+    },
+    {
+      "id": "voice-isolation",
+      "title": "Voice isolation implementeren",
+      "description": "Kernfeature: alle geluiden wegfilteren behalve de geselecteerde stem (denk aan klaslokaal met draadloze microfoon). DeepFilterNet3 als filterkern, mono 48kHz, drie filterstanden (Natuurlijk/Gebalanceerd/Sterk), zachte voice-activity-demping.",
+      "status": "planned",
+      "nextAction": null,
+      "blockedReason": null
+    },
+    {
+      "id": "white-noise",
+      "title": "White noise generation",
+      "description": "Feature uit de README: witte-ruisgeneratie.",
+      "status": "planned",
+      "nextAction": null,
+      "blockedReason": null
+    },
+    {
+      "id": "agc-limiter",
+      "title": "AGC/limiter tegen onverwacht harde pieken",
+      "description": "Na MVP (besluit Floris 2026-08-31): gain control in de C++-kern zodat geen filterstand onverwacht harde pieken produceert. Bewust niet voor de MVP.",
+      "status": "planned",
+      "nextAction": null,
+      "blockedReason": null
+    }
+  ]
+}
