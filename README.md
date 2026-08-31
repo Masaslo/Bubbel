@@ -36,6 +36,14 @@ Bubbel is een volledig lokale Android-app voor mensen met misofonie of andere au
 
 Zie [PLAN.md](PLAN.md) voor de volledige scope. Issues en PR's zijn welkom.
 
+**Branch naming:** gebruik voor wijzigingen altijd een branch met een van deze prefixes:
+
+- `feature/` — nieuwe functionaliteit
+- `docs/` — documentatie
+- `fix/` — bugfixes
+
+Wijzigingen gaan via een pull request naar `main`; direct pushen naar `main` is niet toegestaan.
+
 ## Licentie
 
 Zie [LICENSE](LICENSE).
