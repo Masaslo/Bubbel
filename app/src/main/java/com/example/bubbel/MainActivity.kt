@@ -116,10 +116,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        val sessionIsInFlight = listeningViewModel.state.value is AudioSessionState.Starting ||
-            listeningViewModel.state.value is AudioSessionState.Running ||
-            listeningViewModel.state.value is AudioSessionState.Recovering
-        if (sessionIsInFlight &&
+        if (shouldStopForPermissionRevocation(listeningViewModel.state.value) &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
         ) {
             listeningViewModel.onMicrophonePermissionRevoked()
@@ -134,6 +131,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+internal fun shouldStopForPermissionRevocation(state: AudioSessionState): Boolean =
+    state is AudioSessionState.Starting ||
+        state is AudioSessionState.Running ||
+        state is AudioSessionState.Recovering
 
 @Composable
 fun BubbelHomeScreen(

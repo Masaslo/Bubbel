@@ -6,6 +6,7 @@ import com.example.bubbel.audio.AudioSessionController
 import com.example.bubbel.audio.AudioSessionState
 import com.example.bubbel.audio.FilterMode
 import com.example.bubbel.audio.InputPreference
+import com.example.bubbel.shouldStopForPermissionRevocation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.junit.Assert.assertEquals
@@ -60,6 +61,15 @@ class ListeningViewModelTest {
         assertEquals(1, controller.stopCount)
         assertTrue(viewModel.permissionDenied.value)
         assertFalse(viewModel.uiState.isActive)
+    }
+
+    @Test
+    fun permissionRevocationStopsOnlyInFlightAudioStates() {
+        assertTrue(shouldStopForPermissionRevocation(AudioSessionState.Starting))
+        assertTrue(shouldStopForPermissionRevocation(AudioSessionState.Running(AudioRoute.Wired)))
+        assertTrue(shouldStopForPermissionRevocation(AudioSessionState.Recovering(1)))
+        assertFalse(shouldStopForPermissionRevocation(AudioSessionState.Idle))
+        assertFalse(shouldStopForPermissionRevocation(AudioSessionState.Failed("native error")))
     }
 
     @Test
