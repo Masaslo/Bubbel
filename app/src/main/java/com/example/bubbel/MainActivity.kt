@@ -1,6 +1,9 @@
 package com.example.bubbel
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -40,6 +43,7 @@ import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Vibration
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -73,31 +77,65 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.example.bubbel.data.repository.InMemoryListeningStateRepository
-import com.example.bubbel.domain.model.ListeningState
+import androidx.lifecycle.ViewModelProvider
+import androidx.core.content.ContextCompat
+import com.example.bubbel.audio.AudioRoute
+import com.example.bubbel.audio.AudioSessionState
+import com.example.bubbel.audio.DefaultAudioSessionController
 import com.example.bubbel.presentation.home.ListeningViewModel
 import com.example.bubbel.ui.theme.BubbelTheme
 
 class MainActivity : ComponentActivity() {
+    private lateinit var audioSessionController: DefaultAudioSessionController
+    private lateinit var listeningViewModel: ListeningViewModel
+    private val microphonePermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) listeningViewModel.start() else listeningViewModel.onPermissionDenied()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        audioSessionController = DefaultAudioSessionController(this)
+        listeningViewModel = ViewModelProvider(
+            this,
+            viewModelFactory { initializer { ListeningViewModel(audioSessionController) } }
+        )[ListeningViewModel::class.java]
         enableEdgeToEdge()
-        setContent { BubbelTheme { BubbelHomeScreen() } }
+        setContent {
+            BubbelTheme {
+                BubbelHomeScreen(
+                    listeningViewModel = listeningViewModel,
+                    onStartRequested = ::startAfterMicrophonePermission,
+                )
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        audioSessionController.close()
+        super.onDestroy()
+    }
+
+    private fun startAfterMicrophonePermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            listeningViewModel.start()
+        } else {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 }
 
 @Composable
 fun BubbelHomeScreen(
-    listeningViewModel: ListeningViewModel = viewModel(
-        factory = viewModelFactory {
-            initializer { ListeningViewModel(InMemoryListeningStateRepository()) }
-        }
-    )
+    listeningViewModel: ListeningViewModel,
+    onStartRequested: () -> Unit,
 ) {
     val state by listeningViewModel.state.collectAsState()
+    val permissionDenied by listeningViewModel.permissionDenied.collectAsState()
+    val uiState = listeningViewModel.uiState
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var muteSounds by rememberSaveable { mutableStateOf(true) }
     var haptics by rememberSaveable { mutableStateOf(false) }
@@ -112,10 +150,18 @@ fun BubbelHomeScreen(
             fieldHeight = maxHeight
         )
         BubbleToggle(
-            isActive = state == ListeningState.Active,
-            onToggle = listeningViewModel::toggle,
+            isActive = uiState.isActive,
+            description = bubbleDescription(state, permissionDenied, uiState.route, uiState.failureDescription),
+            onToggle = {
+                if (state is AudioSessionState.Starting || state is AudioSessionState.Running || state is AudioSessionState.Recovering) {
+                    listeningViewModel.stop()
+                } else {
+                    onStartRequested()
+                }
+            },
             modifier = Modifier.align(Alignment.Center)
         )
+        uiState.route?.let { RouteStatus(route = it, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(top = 16.dp, start = 20.dp)) }
         SettingsButton(
             onClick = { settingsOpen = !settingsOpen },
             modifier = Modifier
@@ -133,6 +179,50 @@ fun BubbelHomeScreen(
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
                 .padding(top = 92.dp, end = 20.dp)
+        )
+    }
+}
+
+private fun bubbleDescription(
+    state: AudioSessionState,
+    permissionDenied: Boolean,
+    route: AudioRoute?,
+    failureDescription: String?,
+): String = when {
+    permissionDenied -> "Luistermodus mislukt: microfoonmachtiging geweigerd"
+    state is AudioSessionState.Running -> "Luistermodus aan via ${route?.label ?: state.route.label}"
+    state is AudioSessionState.Starting -> "Luistermodus starten"
+    state is AudioSessionState.Recovering -> "Luistermodus herstellen"
+    failureDescription != null -> "Luistermodus mislukt: $failureDescription"
+    else -> "Luistermodus uit"
+}
+
+@Composable
+private fun RouteStatus(route: AudioRoute, modifier: Modifier = Modifier) {
+    val warning = route.warning
+    IconButton(
+        onClick = {},
+        enabled = false,
+        modifier = modifier
+            .size(64.dp)
+            .background(
+                if (warning == null) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                RoundedCornerShape(22.dp)
+            )
+            .semantics {
+                contentDescription = if (warning == null) {
+                    "Audioroute: ${route.label}"
+                } else {
+                    "Audioroute: ${route.label}. Waarschuwing: $warning"
+                }
+            }
+            .testTag("audio_route_status")
+    ) {
+        Icon(
+            imageVector = if (warning == null) Icons.Outlined.GraphicEq else Icons.Outlined.WarningAmber,
+            contentDescription = null,
+            tint = if (warning == null) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onError,
+            modifier = Modifier.size(30.dp)
         )
     }
 }
@@ -230,7 +320,12 @@ private fun SettingsSwitch(
 }
 
 @Composable
-private fun BubbleToggle(isActive: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+private fun BubbleToggle(
+    isActive: Boolean,
+    description: String,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val transition = updateTransition(targetState = isActive, label = "bubble state")
     val activation by transition.animateFloat(
         transitionSpec = { tween(durationMillis = 760, easing = FastOutSlowInEasing) },
@@ -252,7 +347,6 @@ private fun BubbleToggle(isActive: Boolean, onToggle: () -> Unit, modifier: Modi
         animationSpec = infiniteRepeatable(tween(1900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "ring breath"
     ).value
-    val description = if (isActive) "Luistermodus aan" else "Luistermodus uit"
     val colors = MaterialTheme.colorScheme
     val visuals = bubbleAnimationVisuals(activation)
     val interactionSource = remember { MutableInteractionSource() }
