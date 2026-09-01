@@ -2,21 +2,17 @@
 
 #include "audio/VoiceWorker.h"
 #include "audio/RateConverter.h"
+#include "audio/LifecycleState.h"
 #include "model/VoiceFilter.h"
 
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <array>
-#include <string>
 #include <thread>
 
 #include <oboe/Oboe.h>
 struct AAssetManager;
-
-enum class AudioEventKind { Starting, Running, Recovering, Failed, Stopped };
-struct AudioEvent { AudioEventKind kind; int value = 0; std::string text; };
 
 class AudioEngine final : public oboe::AudioStreamCallback {
 public:
@@ -40,9 +36,11 @@ private:
     };
     void workerLoop();
     bool openStreams();
-    void closeStreams();
-    void pushEvent(AudioEventKind kind, int value = 0, const char* text = "");
-    void recover();
+    void closeStreamsLocked();
+    bool startLocked(int filterMode, float outputGain);
+    void stopLocked(bool emitStopped);
+    void recoverLocked();
+    void failLocked(const char* reason, int value = 0);
 
     static constexpr std::size_t kQueueSamples = 48'000;
     SpscRingBuffer<float> input_{kQueueSamples}, output_{kQueueSamples};
@@ -50,14 +48,13 @@ private:
     FilterAdapter filterAdapter_{filter_};
     VoiceWorker worker_{input_, output_, filterAdapter_};
     std::shared_ptr<oboe::AudioStream> outputStream_, inputStream_;
-    std::thread workerThread_, recoveryThread_;
-    std::mutex controlMutex_, eventMutex_;
-    std::array<AudioEvent, 16> events_{};
-    std::size_t eventRead_ = 0, eventWrite_ = 0, eventCount_ = 0;
-    std::atomic<bool> running_{false}, recovering_{false};
+    std::thread workerThread_;
+    std::mutex controlMutex_;
+    LifecycleState lifecycle_;
+    std::atomic<bool> running_{false};
     std::atomic<float> outputGain_{1.0F};
     std::atomic<int> outputChannels_{1};
     std::array<float, 1920> inputScratch_ = {};
-    std::atomic<bool> terminalFailure_{false}, recoveryRequested_{false}, manualStop_{false};
+    std::atomic<bool> terminalFailure_{false};
     bool modelReady_ = false;
 };

@@ -45,6 +45,12 @@ public:
         return read;
     }
 
+    // Only call after both producer and consumer have stopped.
+    void clear() noexcept {
+        const std::size_t writeIndex = writeIndex_.load(std::memory_order_acquire);
+        readIndex_.store(writeIndex, std::memory_order_release);
+    }
+
 private:
     std::vector<T> storage_;
     const std::size_t capacity_;

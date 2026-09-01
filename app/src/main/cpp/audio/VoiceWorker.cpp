@@ -28,7 +28,16 @@ void VoiceWorker::processAvailable() noexcept {
     });
 }
 
-void VoiceWorker::reset() noexcept { filter_.reset(); watchdog_ = DeadlineWatchdog{}; deadlineFailure_.store(false, std::memory_order_release); }
+void VoiceWorker::reset() noexcept {
+    filter_.reset();
+    assembler_ = FrameAssembler<480>{};
+    mixer_ = ProfileMixer{FilterProfile::Balanced};
+    watchdog_ = DeadlineWatchdog{};
+    inputConverter_ = RateConverter{};
+    outputConverter_ = RateConverter{};
+    converterReady_.store(false, std::memory_order_release);
+    deadlineFailure_.store(false, std::memory_order_release);
+}
 void VoiceWorker::setFilterMode(int mode) noexcept { requestedMode_.store(mode, std::memory_order_relaxed); }
 void VoiceWorker::setRouteSampleRate(int sampleRate) noexcept { inputConverter_.configure(sampleRate, 48000); outputConverter_.configure(48000, sampleRate); converterReady_.store(sampleRate > 0, std::memory_order_release); }
 bool VoiceWorker::takeDeadlineFailure() noexcept { return deadlineFailure_.exchange(false, std::memory_order_acq_rel); }

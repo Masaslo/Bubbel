@@ -1,5 +1,6 @@
 #include "audio/VoiceWorker.h"
 #include "audio/RateConverter.h"
+#include "audio/LifecycleState.h"
 
 #include <array>
 #include <cstdio>
@@ -79,6 +80,21 @@ void workerStopsAfterInvalidDurationAndResetClearsFailure() {
     expect(worker.takeDeadlineFailure(), "worker reports 250ms invalid output");
     worker.reset(); expect(!worker.takeDeadlineFailure(), "reset clears deadline failure");
 }
+void lifecycleQueuesEventsAndSuppressesRecoveryAfterManualStop() {
+    LifecycleState lifecycle;
+    lifecycle.pushEvent(AudioEventKind::Starting);
+    lifecycle.pushEvent(AudioEventKind::Running, 48000);
+    const auto starting = lifecycle.popEvent();
+    const auto running = lifecycle.popEvent();
+    expect(starting && starting->kind == AudioEventKind::Starting && running && running->kind == AudioEventKind::Running,
+           "lifecycle events preserve FIFO order");
+
+    lifecycle.requestRecovery();
+    expect(lifecycle.takeRecoveryRequest(), "recovery request is accepted after a completed transition");
+    lifecycle.manualStop();
+    lifecycle.requestRecovery();
+    expect(!lifecycle.takeRecoveryRequest(), "manual stop suppresses recovery");
+}
 }
 
 int main() {
@@ -88,6 +104,7 @@ int main() {
     resamplingPreservesEndpointsAcrossRates();
     workerStopsAfterThreeInvalidHops();
     workerStopsAfterInvalidDurationAndResetClearsFailure();
+    lifecycleQueuesEventsAndSuppressesRecoveryAfterManualStop();
     std::printf(failures == 0 ? "PASS: AudioEngineTests\n" : "FAIL: AudioEngineTests\n");
     return failures == 0 ? 0 : 1;
 }
