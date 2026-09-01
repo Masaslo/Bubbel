@@ -2,13 +2,22 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <condition_variable>
 #include <mutex>
 #include <optional>
 #include <string>
 
 enum class AudioEventKind { Starting, Running, Recovering, Failed, Stopped };
 struct AudioEvent { AudioEventKind kind; int value = 0; std::string text; };
+
+// The caller owns the control lock. wait_for releases it while waiting, so a
+// manual stop can set its cancellation flag and wake recovery immediately.
+inline bool waitForRecoveryRetry(std::condition_variable& cancellation,
+                                 std::unique_lock<std::mutex>& controlLock,
+                                 const class LifecycleState& lifecycle,
+                                 std::chrono::milliseconds delay);
 
 // Callback error delivery only requests recovery atomically. All transition
 // decisions and stream ownership remain with AudioEngine's control mutex.
@@ -59,3 +68,10 @@ private:
     std::array<AudioEvent, 16> events_{};
     std::size_t eventRead_ = 0, eventWrite_ = 0, eventCount_ = 0;
 };
+
+inline bool waitForRecoveryRetry(std::condition_variable& cancellation,
+                                 std::unique_lock<std::mutex>& controlLock,
+                                 const LifecycleState& lifecycle,
+                                 std::chrono::milliseconds delay) {
+    return !cancellation.wait_for(controlLock, delay, [&lifecycle] { return lifecycle.isManualStop(); });
+}

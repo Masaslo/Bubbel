@@ -36,15 +36,16 @@ bool AudioEngine::startLocked(int filterMode, float outputGain) {
     return true;
 }
 void AudioEngine::stop() {
-    std::lock_guard<std::mutex> lock(controlMutex_);
+    std::unique_lock<std::mutex> lock(controlMutex_);
     lifecycle_.manualStop();
+    recoveryCancellation_.notify_all();
     stopLocked(true);
 }
 void AudioEngine::setFilterMode(int mode) noexcept { worker_.setFilterMode(mode); }
 std::optional<AudioEvent> AudioEngine::pollEvent() {
     {
-        std::lock_guard<std::mutex> lock(controlMutex_);
-        if (lifecycle_.takeRecoveryRequest()) recoverLocked();
+        std::unique_lock<std::mutex> lock(controlMutex_);
+        if (lifecycle_.takeRecoveryRequest()) recoverLocked(lock);
         if (terminalFailure_.exchange(false)) failLocked("audio callback capacity exceeded");
         if (worker_.takeDeadlineFailure()) failLocked("model deadline exceeded");
     }
@@ -104,12 +105,13 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* stream, vo
     return oboe::DataCallbackResult::Continue;
 }
 void AudioEngine::onErrorAfterClose(oboe::AudioStream*, oboe::Result) { lifecycle_.requestRecovery(); }
-void AudioEngine::recoverLocked() {
+void AudioEngine::recoverLocked(std::unique_lock<std::mutex>& controlLock) {
     stopLocked(false);
     for (int attempt = 1; attempt <= 3; ++attempt) {
         if (lifecycle_.isManualStop()) return;
         lifecycle_.pushEvent(AudioEventKind::Recovering, attempt);
-        std::this_thread::sleep_for(std::chrono::milliseconds(recoveryDelayMillis(attempt)));
+        if (!waitForRecoveryRetry(recoveryCancellation_, controlLock, lifecycle_,
+                                  std::chrono::milliseconds(recoveryDelayMillis(attempt)))) return;
         if (lifecycle_.isManualStop()) return;
         if (openStreams()) {
             running_ = true;

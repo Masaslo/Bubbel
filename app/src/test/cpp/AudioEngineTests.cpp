@@ -3,7 +3,11 @@
 #include "audio/LifecycleState.h"
 
 #include <array>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
+#include <mutex>
+#include <thread>
 
 namespace {
 int failures = 0;
@@ -95,6 +99,40 @@ void lifecycleQueuesEventsAndSuppressesRecoveryAfterManualStop() {
     lifecycle.requestRecovery();
     expect(!lifecycle.takeRecoveryRequest(), "manual stop suppresses recovery");
 }
+void recoveryRetriesCanRepeatAndManualStopCancelsWait() {
+    LifecycleState lifecycle;
+    for (int request = 0; request < 3; ++request) {
+        lifecycle.requestRecovery();
+        expect(lifecycle.takeRecoveryRequest(), "each recovery request is accepted after the preceding recovery");
+    }
+
+    std::mutex controlMutex;
+    std::condition_variable cancellation;
+    std::mutex enteredMutex;
+    std::condition_variable entered;
+    bool recoveryEntered = false;
+    bool retryCompleted = true;
+    std::thread recovery([&] {
+        std::unique_lock<std::mutex> controlLock(controlMutex);
+        {
+            std::lock_guard<std::mutex> enteredLock(enteredMutex);
+            recoveryEntered = true;
+        }
+        entered.notify_one();
+        retryCompleted = waitForRecoveryRetry(cancellation, controlLock, lifecycle, std::chrono::seconds(5));
+    });
+    {
+        std::unique_lock<std::mutex> enteredLock(enteredMutex);
+        entered.wait(enteredLock, [&] { return recoveryEntered; });
+    }
+    {
+        std::lock_guard<std::mutex> controlLock(controlMutex);
+        lifecycle.manualStop();
+        cancellation.notify_all();
+    }
+    recovery.join();
+    expect(!retryCompleted, "manual stop cancels an in-progress retry wait");
+}
 }
 
 int main() {
@@ -105,6 +143,7 @@ int main() {
     workerStopsAfterThreeInvalidHops();
     workerStopsAfterInvalidDurationAndResetClearsFailure();
     lifecycleQueuesEventsAndSuppressesRecoveryAfterManualStop();
+    recoveryRetriesCanRepeatAndManualStopCancelsWait();
     std::printf(failures == 0 ? "PASS: AudioEngineTests\n" : "FAIL: AudioEngineTests\n");
     return failures == 0 ? 0 : 1;
 }

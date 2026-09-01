@@ -6,6 +6,7 @@
 #include "model/VoiceFilter.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -39,7 +40,7 @@ private:
     void closeStreamsLocked();
     bool startLocked(int filterMode, float outputGain);
     void stopLocked(bool emitStopped);
-    void recoverLocked();
+    void recoverLocked(std::unique_lock<std::mutex>& controlLock);
     void failLocked(const char* reason, int value = 0);
 
     static constexpr std::size_t kQueueSamples = 48'000;
@@ -50,6 +51,7 @@ private:
     std::shared_ptr<oboe::AudioStream> outputStream_, inputStream_;
     std::thread workerThread_;
     std::mutex controlMutex_;
+    std::condition_variable recoveryCancellation_;
     LifecycleState lifecycle_;
     std::atomic<bool> running_{false};
     std::atomic<float> outputGain_{1.0F};
