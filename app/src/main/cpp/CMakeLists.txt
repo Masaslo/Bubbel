@@ -12,7 +12,14 @@ add_executable(audio_core_tests
 
 target_include_directories(audio_core_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
+add_executable(audio_engine_tests
+    ${CMAKE_CURRENT_LIST_DIR}/../../test/cpp/AudioEngineTests.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/audio/VoiceWorker.cpp
+)
+target_include_directories(audio_engine_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+
 if(ANDROID)
+    find_package(oboe REQUIRED CONFIG)
     set(BUBBEL_LIBDF_PATH
         ${CMAKE_CURRENT_LIST_DIR}/../../../build/generated/jniLibs/${ANDROID_ABI}/libbubbel_libdf.so)
     if(NOT EXISTS ${BUBBEL_LIBDF_PATH})
@@ -31,4 +38,13 @@ if(ANDROID)
     )
     target_include_directories(voice_filter_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
     target_link_libraries(voice_filter_tests PRIVATE bubbel_libdf)
+
+    add_library(bubbel_audio SHARED
+        ${CMAKE_CURRENT_LIST_DIR}/audio/AudioEngine.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/audio/VoiceWorker.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/jni/AudioEngineJni.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/model/LibDfVoiceFilter.cpp
+    )
+    target_include_directories(bubbel_audio PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+    target_link_libraries(bubbel_audio PRIVATE oboe::oboe bubbel_libdf android log)
 endif()

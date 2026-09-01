@@ -28,6 +28,7 @@ public:
     VoiceFilter& operator=(const VoiceFilter&) = delete;
 
     [[nodiscard]] FilterResult initialize(const ModelFiles& files);
+    [[nodiscard]] FilterResult initializeBytes(const std::uint8_t* bytes, std::size_t size);
     // This reconstructs the complete Rust DfTract. Invoke it outside callbacks.
     [[nodiscard]] FilterResult reset();
     [[nodiscard]] FilterResult process(const float input[kHopSize], float output[kHopSize]);

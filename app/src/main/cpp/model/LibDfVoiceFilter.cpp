@@ -35,9 +35,15 @@ FilterResult VoiceFilter::initialize(const ModelFiles& files) {
         return FilterResult::ModelError;
     }
 
+    return initializeBytes(modelBytes.data(), modelBytes.size());
+}
+
+FilterResult VoiceFilter::initializeBytes(const std::uint8_t* bytes, std::size_t size) {
+    if (bytes == nullptr || size == 0U) {
+        return FilterResult::InvalidArgument;
+    }
     BubbelLibDfSession* newSession = nullptr;
-    const FilterResult result = statusToResult(
-        bubbel_libdf_open(modelBytes.data(), modelBytes.size(), &newSession));
+    const FilterResult result = statusToResult(bubbel_libdf_open(bytes, size, &newSession));
     if (result != FilterResult::Ok) {
         return result;
     }
