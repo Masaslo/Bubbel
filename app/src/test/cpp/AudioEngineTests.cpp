@@ -1,4 +1,5 @@
 #include "audio/VoiceWorker.h"
+#include "audio/RateConverter.h"
 
 #include <array>
 #include <cstdio>
@@ -17,6 +18,11 @@ public:
     void reset() noexcept override { ++resets; }
     int calls = 0;
     int resets = 0;
+};
+class FailingFilter final : public IVoiceFilter {
+public:
+    bool process(const float[480], float[480]) noexcept override { return false; }
+    void reset() noexcept override {}
 };
 
 void outputSilencesUnderrunAndDuplicatesMono() {
@@ -55,12 +61,25 @@ void resetAndRetryUseFixedDelays() {
     expect(filter.resets == 1, "reset reaches filter");
     expect(recoveryDelayMillis(1) == 100 && recoveryDelayMillis(2) == 250 && recoveryDelayMillis(3) == 500, "retry delays are fixed");
 }
+void resamplingPreservesEndpointsAcrossRates() {
+    std::array<float, 2> input = {0, 1}; std::array<float, 4> output = {};
+    const auto count = resampleMono(input.data(), input.size(), 24000, output.data(), output.size(), 48000);
+    expect(count == 4 && output[0] == 0 && output[3] == 1, "resampling preserves endpoints");
+}
+void workerStopsAfterThreeInvalidHops() {
+    SpscRingBuffer<float> input(2048), output(2048); FailingFilter filter; VoiceWorker worker(input, output, filter);
+    std::array<float, 1440> samples = {}; input.write(samples.data(), samples.size());
+    worker.processAvailable(); worker.processAvailable(); worker.processAvailable();
+    expect(worker.takeDeadlineFailure(), "worker reports third invalid hop");
+}
 }
 
 int main() {
     outputSilencesUnderrunAndDuplicatesMono();
     workerFramesInputAndWritesOneHop();
     resetAndRetryUseFixedDelays();
+    resamplingPreservesEndpointsAcrossRates();
+    workerStopsAfterThreeInvalidHops();
     std::printf(failures == 0 ? "PASS: AudioEngineTests\n" : "FAIL: AudioEngineTests\n");
     return failures == 0 ? 0 : 1;
 }

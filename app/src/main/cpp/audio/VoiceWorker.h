@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audio/FrameAssembler.h"
+#include "audio/DeadlineWatchdog.h"
 #include "audio/ProfileMixer.h"
 #include "audio/SpscRingBuffer.h"
 
@@ -24,6 +25,8 @@ public:
     void processAvailable() noexcept;
     void reset() noexcept;
     void setFilterMode(int mode) noexcept;
+    bool takeDeadlineFailure() noexcept;
+    bool deadlineFailed() const noexcept { return deadlineFailure_.load(std::memory_order_acquire); }
 
 private:
     SpscRingBuffer<float>& input_;
@@ -34,6 +37,8 @@ private:
     std::array<float, 480> enhanced_ = {};
     ProfileMixer mixer_{FilterProfile::Balanced};
     std::atomic<int> requestedMode_{1};
+    DeadlineWatchdog watchdog_;
+    std::atomic<bool> deadlineFailure_{false};
 };
 
 // Callback-safe interleaving helper: an empty output queue is rendered as
