@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -53,6 +55,77 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+    sourceSets {
+        getByName("main").jniLibs.directories.add(
+            layout.buildDirectory.dir("generated/jniLibs").get().asFile.absolutePath,
+        )
+    }
+}
+
+val repositoryRoot = rootProject.projectDir.absolutePath.replace('\\', '/')
+val repositoryRootForBash = if (System.getProperty("os.name").startsWith("Windows")) {
+    val drive = repositoryRoot.substring(0, 1).lowercase()
+    "/mnt/$drive/${repositoryRoot.substring(3)}"
+} else {
+    repositoryRoot
+}
+
+tasks.register<Exec>("setupLibDfToolchain") {
+    val script = "$repositoryRootForBash/app/src/main/rust/setup-wsl-toolchain.sh"
+    if (System.getProperty("os.name").startsWith("Windows")) {
+        commandLine("wsl.exe", "bash", script, repositoryRootForBash)
+    } else {
+        commandLine("bash", script, repositoryRootForBash)
+    }
+}
+
+fun registerLibDfBuild(name: String, abi: String) = tasks.register<Exec>(name) {
+    val script = "$repositoryRootForBash/app/src/main/rust/build-android.sh"
+    if (System.getProperty("os.name").startsWith("Windows")) {
+        commandLine("wsl.exe", "bash", script, repositoryRootForBash, abi)
+    } else {
+        commandLine("bash", script, repositoryRootForBash, abi)
+    }
+    inputs.files(fileTree("src/main/rust") { exclude("target/**") })
+    outputs.file(layout.buildDirectory.file("generated/jniLibs/$abi/libbubbel_libdf.so"))
+}
+
+val buildLibDfArm64 = registerLibDfBuild("buildLibDfArm64", "arm64-v8a")
+val buildLibDfX86_64 = registerLibDfBuild("buildLibDfX86_64", "x86_64")
+
+tasks.configureEach {
+    if (name.startsWith("configureCMake") ||
+        (name.startsWith("merge") && name.endsWith("JniLibFolders"))) {
+        dependsOn(buildLibDfArm64, buildLibDfX86_64)
+    }
+}
+
+tasks.register<Exec>("connectedVoiceFilterTest") {
+    dependsOn("externalNativeBuildDebug")
+    onlyIf { System.getProperty("os.name").startsWith("Windows") }
+    commandLine(
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        file("src/test/scripts/run-voice-filter-tests.ps1").absolutePath,
+        repositoryRoot,
+    )
+}
+
+tasks.register("verifyVoiceFilterPackaging") {
+    dependsOn("assembleDebug")
+    val debugApk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
+    inputs.file(debugApk)
+    doLast {
+        ZipFile(debugApk.get().asFile).use { apk ->
+            listOf(
+                "lib/arm64-v8a/libbubbel_libdf.so",
+                "lib/x86_64/libbubbel_libdf.so",
+            ).forEach { requiredEntry ->
+                check(apk.getEntry(requiredEntry) != null) {
+                    "Debug APK is missing $requiredEntry"
+                }
+            }
         }
     }
 }

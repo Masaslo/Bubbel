@@ -6,6 +6,19 @@ android_abi="${2:?Android ABI is required}"
 tool_root="$repo_root/.local-tools/wsl"
 ndk_bin="$tool_root/ndk-links/android-ndk-r28c/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
+for required_tool in \
+  "$tool_root/cargo/bin/rustup" \
+  "$tool_root/cargo/bin/cargo" \
+  "$tool_root/host-linker.sh" \
+  "$tool_root/zig-x86_64-linux-0.16.0/zig" \
+  "$ndk_bin/clang"; do
+  if [[ ! -x "$required_tool" ]]; then
+    echo "Missing pinned libDF toolchain component: $required_tool" >&2
+    echo "Run ./gradlew setupLibDfToolchain from the repository root." >&2
+    exit 3
+  fi
+done
+
 case "$android_abi" in
   x86_64)
     rust_target="x86_64-linux-android"
@@ -34,12 +47,14 @@ target_env="${rust_target^^}"
 target_env="${target_env//-/_}"
 export "CARGO_TARGET_${target_env}_LINKER=$linker"
 
+"$CARGO_HOME/bin/rustup" target add --toolchain 1.98.0 "$rust_target"
+
 "$CARGO_HOME/bin/cargo" +1.98.0 build \
   --manifest-path "$repo_root/app/src/main/rust/Cargo.toml" \
   --locked \
   --release \
   --target "$rust_target"
 
-output_dir="$repo_root/app/build/rust/$android_abi/release"
+output_dir="$repo_root/app/build/generated/jniLibs/$android_abi"
 mkdir -p "$output_dir"
 cp "$CARGO_TARGET_DIR/$rust_target/release/libbubbel_libdf.so" "$output_dir/libbubbel_libdf.so"

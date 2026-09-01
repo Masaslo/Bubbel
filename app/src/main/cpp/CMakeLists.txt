@@ -14,7 +14,7 @@ target_include_directories(audio_core_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 if(ANDROID)
     set(BUBBEL_LIBDF_PATH
-        ${CMAKE_CURRENT_LIST_DIR}/../../../build/rust/${ANDROID_ABI}/release/libbubbel_libdf.so)
+        ${CMAKE_CURRENT_LIST_DIR}/../../../build/generated/jniLibs/${ANDROID_ABI}/libbubbel_libdf.so)
     if(NOT EXISTS ${BUBBEL_LIBDF_PATH})
         message(FATAL_ERROR
             "Missing ${BUBBEL_LIBDF_PATH}. Run app/src/main/rust/build-android.sh first.")

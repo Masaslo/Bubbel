@@ -3,6 +3,12 @@
 //! `bubbel_libdf_reopen` intentionally replaces the complete `DfTract` object.
 //! Call it from a worker/control thread only; inference itself never belongs in
 //! an Oboe callback.
+//!
+//! The exported functions reject null/misaligned pointers and invalid lengths.
+//! As with any raw-pointer C ABI, callers must still provide live, accessible
+//! buffers and may only use a session returned by `bubbel_libdf_open` until its
+//! first `bubbel_libdf_close`; forged, stale and double-closed handles are
+//! caller undefined behavior and cannot be made safe by `catch_unwind`.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -52,8 +58,13 @@ fn buffers_overlap(input: *const f32, input_len: usize, output: *mut f32, output
     input_start < output_end && output_start < input_end
 }
 
+fn is_aligned<T>(pointer: *const T) -> bool {
+    (pointer as usize) % std::mem::align_of::<T>() == 0
+}
+
 /// Parses a complete, immutable DeepFilterNet3 tar archive and creates an
-/// opaque session. Both `model_bytes` and `out_session` must be valid.
+/// opaque session. Both `model_bytes` and `out_session` must reference live,
+/// accessible storage for their declared sizes.
 #[no_mangle]
 pub unsafe extern "C" fn bubbel_libdf_open(
     model_bytes: *const u8,
@@ -61,7 +72,11 @@ pub unsafe extern "C" fn bubbel_libdf_open(
     out_session: *mut *mut BubbelLibDfSession,
 ) -> i32 {
     guarded(|| {
-        if model_bytes.is_null() || model_len == 0 || out_session.is_null() {
+        if model_bytes.is_null()
+            || model_len == 0
+            || out_session.is_null()
+            || !is_aligned(out_session)
+        {
             return BUBBEL_LIBDF_STATUS_INVALID_ARGUMENT;
         }
         let bytes = unsafe { std::slice::from_raw_parts(model_bytes, model_len) };
@@ -79,7 +94,8 @@ pub unsafe extern "C" fn bubbel_libdf_open(
 }
 
 /// Processes exactly one mono, 48 kHz DeepFilterNet3 hop. Input and output
-/// must be separate 480-sample buffers.
+/// must be separate live 480-sample buffers. `session` must be a live handle
+/// returned by `bubbel_libdf_open` and not yet closed.
 #[no_mangle]
 pub unsafe extern "C" fn bubbel_libdf_process(
     session: *mut BubbelLibDfSession,
@@ -92,6 +108,9 @@ pub unsafe extern "C" fn bubbel_libdf_process(
         if session.is_null()
             || input.is_null()
             || output.is_null()
+            || !is_aligned(session)
+            || !is_aligned(input)
+            || !is_aligned(output)
             || input_len != BUBBEL_LIBDF_HOP_SIZE
             || output_len != BUBBEL_LIBDF_HOP_SIZE
             || buffers_overlap(input, input_len, output, output_len)
@@ -115,11 +134,12 @@ pub unsafe extern "C" fn bubbel_libdf_process(
 }
 
 /// Fully resets model, STFT/iSTFT and temporal state by replacing `DfTract`.
-/// It is intentionally not safe for use from a realtime audio callback.
+/// It is intentionally not safe for use from a realtime audio callback. The
+/// session handle must be live and owned by the caller.
 #[no_mangle]
 pub unsafe extern "C" fn bubbel_libdf_reopen(session: *mut BubbelLibDfSession) -> i32 {
     guarded(|| {
-        if session.is_null() {
+        if session.is_null() || !is_aligned(session) {
             return BUBBEL_LIBDF_STATUS_INVALID_ARGUMENT;
         }
         let session = unsafe { &mut *session };
@@ -132,11 +152,12 @@ pub unsafe extern "C" fn bubbel_libdf_reopen(session: *mut BubbelLibDfSession) -
 }
 
 /// Drops an opaque session. A null session is rejected rather than ignored so
-/// callers can surface lifecycle mistakes without relying on undefined state.
+/// callers can surface lifecycle mistakes. A valid handle may be closed once;
+/// stale, forged or already-closed handles are caller undefined behavior.
 #[no_mangle]
 pub unsafe extern "C" fn bubbel_libdf_close(session: *mut BubbelLibDfSession) -> i32 {
     guarded(|| {
-        if session.is_null() {
+        if session.is_null() || !is_aligned(session) {
             return BUBBEL_LIBDF_STATUS_INVALID_ARGUMENT;
         }
         unsafe {

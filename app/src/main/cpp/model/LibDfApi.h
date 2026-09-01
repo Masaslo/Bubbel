@@ -7,6 +7,10 @@ extern "C" {
 
 struct BubbelLibDfSession;
 
+// Raw-pointer ABI contract: buffers must remain live for each call. Session
+// handles are created by bubbel_libdf_open and must be closed exactly once;
+// forged, stale, or double-closed handles are undefined behavior.
+
 enum BubbelLibDfStatus : std::int32_t {
     BUBBEL_LIBDF_STATUS_OK = 0,
     BUBBEL_LIBDF_STATUS_INVALID_ARGUMENT = 1,

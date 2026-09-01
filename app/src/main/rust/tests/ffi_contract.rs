@@ -25,6 +25,11 @@ fn ffi_rejects_invalid_pointers_and_lengths_without_unwinding() {
             bubbel_libdf_process(session, input.as_ptr(), BUBBEL_LIBDF_HOP_SIZE - 1, output.as_mut_ptr(), BUBBEL_LIBDF_HOP_SIZE),
             BUBBEL_LIBDF_STATUS_INVALID_ARGUMENT
         );
+        let misaligned = (input.as_ptr() as *const u8).add(1) as *const f32;
+        assert_eq!(
+            bubbel_libdf_process(session, misaligned, BUBBEL_LIBDF_HOP_SIZE, output.as_mut_ptr(), BUBBEL_LIBDF_HOP_SIZE),
+            BUBBEL_LIBDF_STATUS_INVALID_ARGUMENT
+        );
         assert_ne!(bubbel_libdf_reopen(std::ptr::null_mut()), BUBBEL_LIBDF_STATUS_PANIC);
         assert_eq!(bubbel_libdf_close(session), BUBBEL_LIBDF_STATUS_OK);
     }

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,26 @@ std::vector<float> readFloatFile(const std::string& path) {
     return values;
 }
 
+float readGoldenTolerance(const std::string& metadataPath) {
+    std::ifstream stream(metadataPath);
+    std::ostringstream text;
+    text << stream.rdbuf();
+    const std::string key = "\"golden_tolerance_abs\"";
+    const std::size_t keyPosition = text.str().find(key);
+    if (keyPosition == std::string::npos) {
+        return -1.0F;
+    }
+    const std::size_t colon = text.str().find(':', keyPosition + key.size());
+    if (colon == std::string::npos) {
+        return -1.0F;
+    }
+    try {
+        return std::stof(text.str().substr(colon + 1));
+    } catch (...) {
+        return -1.0F;
+    }
+}
+
 void uninitializedVoiceFilterRejectsA480SampleHop() {
     constexpr char testName[] = "uninitialized voice filter rejects a 480 sample hop";
     VoiceFilter filter;
@@ -46,13 +67,19 @@ void uninitializedVoiceFilterRejectsA480SampleHop() {
     EXPECT_TRUE(testName, filter.process(input.data(), output.data()) == FilterResult::NotInitialized);
 }
 
-void outputMatchesPinnedGolden(const char* modelPath, const char* inputPath, const char* outputPath) {
+void outputMatchesPinnedGolden(
+    const char* modelPath,
+    const char* inputPath,
+    const char* outputPath,
+    const char* metadataPath) {
     constexpr char testName[] = "official libDF output matches pinned golden";
     const std::vector<float> input = readFloatFile(inputPath);
     const std::vector<float> expected = readFloatFile(outputPath);
+    const float tolerance = readGoldenTolerance(metadataPath);
     EXPECT_TRUE(testName, input.size() == VoiceFilter::kHopSize);
     EXPECT_TRUE(testName, expected.size() == VoiceFilter::kHopSize);
-    if (input.size() != VoiceFilter::kHopSize || expected.size() != VoiceFilter::kHopSize) {
+    EXPECT_TRUE(testName, tolerance > 0.0F);
+    if (input.size() != VoiceFilter::kHopSize || expected.size() != VoiceFilter::kHopSize || tolerance <= 0.0F) {
         return;
     }
 
@@ -61,7 +88,7 @@ void outputMatchesPinnedGolden(const char* modelPath, const char* inputPath, con
     EXPECT_TRUE(testName, filter.initialize({modelPath}) == FilterResult::Ok);
     EXPECT_TRUE(testName, filter.process(input.data(), actual.data()) == FilterResult::Ok);
     for (std::size_t index = 0; index < actual.size(); ++index) {
-        EXPECT_TRUE(testName, std::fabs(actual[index] - expected[index]) <= 0.0001F);
+        EXPECT_TRUE(testName, std::fabs(actual[index] - expected[index]) <= tolerance);
     }
 }
 
@@ -87,11 +114,11 @@ void resetReconstructsTheCompleteSession(const char* modelPath, const char* inpu
 
 int main(int argc, char** argv) {
     uninitializedVoiceFilterRejectsA480SampleHop();
-    if (argc != 4) {
-        std::printf("FAIL: expected model, golden input and golden output paths\n");
+    if (argc != 5) {
+        std::printf("FAIL: expected model, golden input, golden output and metadata paths\n");
         return 2;
     }
-    outputMatchesPinnedGolden(argv[1], argv[2], argv[3]);
+    outputMatchesPinnedGolden(argv[1], argv[2], argv[3], argv[4]);
     resetReconstructsTheCompleteSession(argv[1], argv[2]);
 
     if (failures == 0) {
