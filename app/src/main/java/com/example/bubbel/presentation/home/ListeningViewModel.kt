@@ -15,7 +15,7 @@ data class ListeningUiState(
     val failureDescription: String? = null,
 )
 
-class ListeningViewModel(private val controller: AudioSessionController) : ViewModel() {
+open class ListeningViewModel(private val controller: AudioSessionController) : ViewModel() {
     val state: StateFlow<AudioSessionState> = controller.state
     private val mutablePermissionDenied = MutableStateFlow(false)
     val permissionDenied: StateFlow<Boolean> = mutablePermissionDenied.asStateFlow()
@@ -32,6 +32,11 @@ class ListeningViewModel(private val controller: AudioSessionController) : ViewM
     }
 
     fun onPermissionDenied() {
+        mutablePermissionDenied.value = true
+    }
+
+    fun onMicrophonePermissionRevoked() {
+        controller.stop()
         mutablePermissionDenied.value = true
     }
 

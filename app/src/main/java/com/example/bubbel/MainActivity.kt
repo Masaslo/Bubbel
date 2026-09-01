@@ -88,7 +88,6 @@ import com.example.bubbel.presentation.home.ListeningViewModel
 import com.example.bubbel.ui.theme.BubbelTheme
 
 class MainActivity : ComponentActivity() {
-    private lateinit var audioSessionController: DefaultAudioSessionController
     private lateinit var listeningViewModel: ListeningViewModel
     private val microphonePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -98,10 +97,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        audioSessionController = DefaultAudioSessionController(this)
         listeningViewModel = ViewModelProvider(
             this,
-            viewModelFactory { initializer { ListeningViewModel(audioSessionController) } }
+            viewModelFactory {
+                initializer { ListeningViewModel(DefaultAudioSessionController(applicationContext)) }
+            }
         )[ListeningViewModel::class.java]
         enableEdgeToEdge()
         setContent {
@@ -114,9 +114,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() {
-        audioSessionController.close()
-        super.onDestroy()
+    override fun onResume() {
+        super.onResume()
+        val sessionIsInFlight = listeningViewModel.state.value is AudioSessionState.Starting ||
+            listeningViewModel.state.value is AudioSessionState.Running ||
+            listeningViewModel.state.value is AudioSessionState.Recovering
+        if (sessionIsInFlight &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        ) {
+            listeningViewModel.onMicrophonePermissionRevoked()
+        }
     }
 
     private fun startAfterMicrophonePermission() {
