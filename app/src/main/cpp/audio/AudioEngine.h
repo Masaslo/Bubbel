@@ -56,11 +56,8 @@ private:
     std::size_t eventRead_ = 0, eventWrite_ = 0, eventCount_ = 0;
     std::atomic<bool> running_{false}, recovering_{false};
     std::atomic<float> outputGain_{1.0F};
-    std::atomic<unsigned int> inputDrops_{0};
     std::atomic<int> outputChannels_{1};
     std::array<float, 1920> inputScratch_ = {};
-    std::array<float, 2304> convertedInput_ = {}, modelOutput_ = {}, convertedOutput_ = {};
-    std::unique_ptr<RateConverter> inputConverter_, outputConverter_;
     std::atomic<bool> terminalFailure_{false}, recoveryRequested_{false}, manualStop_{false};
     bool modelReady_ = false;
 };

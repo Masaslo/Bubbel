@@ -3,6 +3,7 @@
 #include "audio/FrameAssembler.h"
 #include "audio/DeadlineWatchdog.h"
 #include "audio/ProfileMixer.h"
+#include "audio/RateConverter.h"
 #include "audio/SpscRingBuffer.h"
 
 #include <array>
@@ -26,6 +27,7 @@ public:
     void processAvailable() noexcept;
     void reset() noexcept;
     void setFilterMode(int mode) noexcept;
+    void setRouteSampleRate(int sampleRate) noexcept;
     bool takeDeadlineFailure() noexcept;
     bool deadlineFailed() const noexcept { return deadlineFailure_.load(std::memory_order_acquire); }
     void recordResultForTest(bool valid, std::int64_t timestampMillis) noexcept;
@@ -35,12 +37,15 @@ private:
     SpscRingBuffer<float>& output_;
     IVoiceFilter& filter_;
     FrameAssembler<480> assembler_;
-    std::array<float, 480> readBuffer_ = {};
+    std::array<float, 1920> readBuffer_ = {};
+    std::array<float, 2304> modelInput_ = {}, routeOutput_ = {};
     std::array<float, 480> enhanced_ = {};
     ProfileMixer mixer_{FilterProfile::Balanced};
     std::atomic<int> requestedMode_{1};
     DeadlineWatchdog watchdog_;
     std::atomic<bool> deadlineFailure_{false};
+    RateConverter inputConverter_, outputConverter_;
+    std::atomic<bool> converterReady_{false};
 };
 
 // Callback-safe interleaving helper: an empty output queue is rendered as

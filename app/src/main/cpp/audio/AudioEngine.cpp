@@ -44,7 +44,6 @@ void AudioEngine::setFilterMode(int mode) noexcept { worker_.setFilterMode(mode)
 std::optional<AudioEvent> AudioEngine::pollEvent() {
     if (recoveryRequested_.exchange(false) && !manualStop_) recover();
     if (terminalFailure_.exchange(false)) { stop(); pushEvent(AudioEventKind::Failed, 0, "audio callback capacity exceeded"); }
-    if (inputDrops_.exchange(0, std::memory_order_acq_rel) != 0) pushEvent(AudioEventKind::Recovering, 0, "input queue overflow");
     if (worker_.takeDeadlineFailure()) pushEvent(AudioEventKind::Failed, 0, "model deadline exceeded");
     std::lock_guard<std::mutex> lock(eventMutex_);
     if (eventCount_ == 0) return std::nullopt;
@@ -75,9 +74,9 @@ bool AudioEngine::openStreams() {
         in.setSharingMode(oboe::SharingMode::Shared);
         if (in.openStream(inputStream_) != oboe::Result::OK) { outputStream_->close(); outputStream_.reset(); return false; }
     }
+    if (inputStream_->getSampleRate() != outputStream_->getSampleRate()) { closeStreams(); return false; }
+    worker_.setRouteSampleRate(outputStream_->getSampleRate());
     if (outputStream_->requestStart() != oboe::Result::OK || inputStream_->requestStart() != oboe::Result::OK) { closeStreams(); return false; }
-    inputConverter_ = std::make_unique<RateConverter>(inputStream_->getSampleRate(), 48000);
-    outputConverter_ = std::make_unique<RateConverter>(48000, outputStream_->getSampleRate());
     return true;
 }
 void AudioEngine::closeStreams() { if (inputStream_) { inputStream_->requestStop(); inputStream_->close(); inputStream_.reset(); } if (outputStream_) { outputStream_->requestStop(); outputStream_->close(); outputStream_.reset(); } }
@@ -86,23 +85,16 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* stream, vo
     if (stream->getDirection() == oboe::Direction::Output) {
         auto* rendered = static_cast<float*>(audioData);
         const std::size_t sampleCount = static_cast<std::size_t>(frames) * static_cast<std::size_t>(outputChannels_);
-        const std::size_t needed = std::min(modelOutput_.size(), (static_cast<std::size_t>(frames) * 48000U + static_cast<std::size_t>(stream->getSampleRate()) - 1U) / static_cast<std::size_t>(stream->getSampleRate()));
-        for (std::size_t i = 0; i < needed; ++i) { modelOutput_[i] = 0.0F; (void)output_.read(&modelOutput_[i], 1); }
-        std::size_t converted = 0;
-        if (!outputConverter_ || !outputConverter_->process(modelOutput_.data(), needed, convertedOutput_.data(), convertedOutput_.size(), &converted)) { terminalFailure_ = true; std::memset(rendered, 0, sampleCount * sizeof(float)); return oboe::DataCallbackResult::Continue; }
-        for (std::size_t frame = 0; frame < static_cast<std::size_t>(frames); ++frame) {
-            const float sample = frame < converted ? convertedOutput_[frame] : 0.0F;
-            for (int channel = 0; channel < outputChannels_; ++channel) rendered[frame * outputChannels_ + channel] = sample;
-        }
+        renderMonoToOutput(output_, rendered, static_cast<std::size_t>(frames), static_cast<std::size_t>(outputChannels_));
         const float gain = outputGain_.load(std::memory_order_relaxed);
         for (std::size_t i = 0; i < sampleCount; ++i) rendered[i] *= gain;
         return oboe::DataCallbackResult::Continue;
     }
     const auto* source = static_cast<const float*>(audioData); const std::size_t channels = static_cast<std::size_t>(stream->getChannelCount());
-    const std::size_t count = std::min<std::size_t>(static_cast<std::size_t>(frames), inputScratch_.size());
+    if (static_cast<std::size_t>(frames) > inputScratch_.size()) { terminalFailure_ = true; return oboe::DataCallbackResult::Continue; }
+    const std::size_t count = static_cast<std::size_t>(frames);
     for (std::size_t i = 0; i < count; ++i) { float sum = 0; for (std::size_t c = 0; c < channels; ++c) sum += source[i * channels + c]; inputScratch_[i] = sum / static_cast<float>(channels); }
-    std::size_t converted = 0;
-    if (!inputConverter_ || !inputConverter_->process(inputScratch_.data(), count, convertedInput_.data(), convertedInput_.size(), &converted) || input_.write(convertedInput_.data(), converted) != converted) { inputDrops_.fetch_add(1, std::memory_order_relaxed); terminalFailure_ = true; }
+    if (input_.write(inputScratch_.data(), count) != count) terminalFailure_ = true;
     return oboe::DataCallbackResult::Continue;
 }
 void AudioEngine::onErrorAfterClose(oboe::AudioStream*, oboe::Result) { if (!manualStop_) recoveryRequested_ = true; }

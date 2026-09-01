@@ -40,6 +40,7 @@ void workerFramesInputAndWritesOneHop() {
     SpscRingBuffer<float> input(1024), output(1024);
     DoublingFilter filter;
     VoiceWorker worker(input, output, filter);
+    worker.setRouteSampleRate(48000);
     worker.setFilterMode(2);
     std::array<float, 479> first{};
     std::array<float, 1> last = {3};
@@ -67,7 +68,7 @@ void resamplingPreservesEndpointsAcrossRates() {
     expect(converter.process(input.data() + 1, 1, output.data(), output.size(), &count) && count == 2 && output[1] == 1, "converter preserves phase across blocks");
 }
 void workerStopsAfterThreeInvalidHops() {
-    SpscRingBuffer<float> input(2048), output(2048); FailingFilter filter; VoiceWorker worker(input, output, filter);
+    SpscRingBuffer<float> input(2048), output(2048); FailingFilter filter; VoiceWorker worker(input, output, filter); worker.setRouteSampleRate(48000);
     std::array<float, 1440> samples = {}; input.write(samples.data(), samples.size());
     worker.processAvailable(); worker.processAvailable(); worker.processAvailable();
     expect(worker.takeDeadlineFailure(), "worker reports third invalid hop");
