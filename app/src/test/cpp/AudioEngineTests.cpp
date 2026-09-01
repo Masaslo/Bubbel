@@ -62,15 +62,21 @@ void resetAndRetryUseFixedDelays() {
     expect(recoveryDelayMillis(1) == 100 && recoveryDelayMillis(2) == 250 && recoveryDelayMillis(3) == 500, "retry delays are fixed");
 }
 void resamplingPreservesEndpointsAcrossRates() {
-    std::array<float, 2> input = {0, 1}; std::array<float, 4> output = {};
-    const auto count = resampleMono(input.data(), input.size(), 24000, output.data(), output.size(), 48000);
-    expect(count == 4 && output[0] == 0 && output[3] == 1, "resampling preserves endpoints");
+    RateConverter converter(24000, 48000); std::array<float, 2> input = {0, 1}; std::array<float, 4> output = {}; std::size_t count = 0;
+    expect(converter.process(input.data(), 1, output.data(), output.size(), &count) && count == 0, "converter retains initial carry");
+    expect(converter.process(input.data() + 1, 1, output.data(), output.size(), &count) && count == 2 && output[1] == 1, "converter preserves phase across blocks");
 }
 void workerStopsAfterThreeInvalidHops() {
     SpscRingBuffer<float> input(2048), output(2048); FailingFilter filter; VoiceWorker worker(input, output, filter);
     std::array<float, 1440> samples = {}; input.write(samples.data(), samples.size());
     worker.processAvailable(); worker.processAvailable(); worker.processAvailable();
     expect(worker.takeDeadlineFailure(), "worker reports third invalid hop");
+}
+void workerStopsAfterInvalidDurationAndResetClearsFailure() {
+    SpscRingBuffer<float> input(1), output(1); FailingFilter filter; VoiceWorker worker(input, output, filter);
+    worker.recordResultForTest(false, 10); worker.recordResultForTest(false, 260);
+    expect(worker.takeDeadlineFailure(), "worker reports 250ms invalid output");
+    worker.reset(); expect(!worker.takeDeadlineFailure(), "reset clears deadline failure");
 }
 }
 
@@ -80,6 +86,7 @@ int main() {
     resetAndRetryUseFixedDelays();
     resamplingPreservesEndpointsAcrossRates();
     workerStopsAfterThreeInvalidHops();
+    workerStopsAfterInvalidDurationAndResetClearsFailure();
     std::printf(failures == 0 ? "PASS: AudioEngineTests\n" : "FAIL: AudioEngineTests\n");
     return failures == 0 ? 0 : 1;
 }

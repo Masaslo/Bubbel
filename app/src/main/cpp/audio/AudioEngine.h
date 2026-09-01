@@ -60,5 +60,7 @@ private:
     std::atomic<int> outputChannels_{1};
     std::array<float, 1920> inputScratch_ = {};
     std::array<float, 2304> convertedInput_ = {}, modelOutput_ = {}, convertedOutput_ = {};
+    std::unique_ptr<RateConverter> inputConverter_, outputConverter_;
+    std::atomic<bool> terminalFailure_{false}, recoveryRequested_{false}, manualStop_{false};
     bool modelReady_ = false;
 };

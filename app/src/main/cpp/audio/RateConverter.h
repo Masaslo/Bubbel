@@ -1,20 +1,31 @@
 #pragma once
 
-#include <algorithm>
-#include <cmath>
 #include <cstddef>
 
-// Stateless, callback-safe linear conversion for one preallocated block.
-inline std::size_t resampleMono(const float* input, std::size_t inputCount, int inputRate,
-                                float* output, std::size_t outputCapacity, int outputRate) noexcept {
-    if (inputCount == 0 || inputRate <= 0 || outputRate <= 0) return 0;
-    const std::size_t count = std::min(outputCapacity, static_cast<std::size_t>(std::ceil(inputCount * static_cast<double>(outputRate) / inputRate)));
-    for (std::size_t i = 0; i < count; ++i) {
-        const double position = i * static_cast<double>(inputRate) / outputRate;
-        const std::size_t left = std::min(static_cast<std::size_t>(position), inputCount - 1);
-        const std::size_t right = std::min(left + 1, inputCount - 1);
-        const float fraction = static_cast<float>(position - left);
-        output[i] = input[left] + (input[right] - input[left]) * fraction;
+// Continuous linear converter retaining phase/carry across callback blocks.
+class RateConverter {
+public:
+    RateConverter(int inputRate, int outputRate) noexcept : inputRate_(inputRate), outputRate_(outputRate) {}
+    void reset() noexcept { phase_ = 0; havePrevious_ = false; previous_ = 0; }
+    bool process(const float* input, std::size_t inputCount, float* output, std::size_t capacity, std::size_t* produced) noexcept {
+        *produced = 0;
+        if (inputRate_ <= 0 || outputRate_ <= 0) return false;
+        for (std::size_t i = 0; i < inputCount; ++i) {
+            const float current = input[i];
+            if (!havePrevious_) { previous_ = current; havePrevious_ = true; continue; }
+            phase_ += outputRate_;
+            while (phase_ >= inputRate_) {
+                if (*produced == capacity) return false;
+                const float fraction = 1.0F - static_cast<float>(phase_ - inputRate_) / static_cast<float>(outputRate_);
+                output[(*produced)++] = previous_ + (current - previous_) * fraction;
+                phase_ -= inputRate_;
+            }
+            previous_ = current;
+        }
+        return true;
     }
-    return count;
-}
+private:
+    int inputRate_, outputRate_, phase_ = 0;
+    float previous_ = 0;
+    bool havePrevious_ = false;
+};

@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 
 class IVoiceFilter {
 public:
@@ -27,6 +28,7 @@ public:
     void setFilterMode(int mode) noexcept;
     bool takeDeadlineFailure() noexcept;
     bool deadlineFailed() const noexcept { return deadlineFailure_.load(std::memory_order_acquire); }
+    void recordResultForTest(bool valid, std::int64_t timestampMillis) noexcept;
 
 private:
     SpscRingBuffer<float>& input_;

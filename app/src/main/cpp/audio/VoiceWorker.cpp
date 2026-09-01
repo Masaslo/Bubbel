@@ -16,7 +16,7 @@ void VoiceWorker::processAvailable() noexcept {
         bool valid = filter_.process(frame, enhanced_.data());
         for (float sample : enhanced_) valid = valid && std::isfinite(sample);
         const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        if (watchdog_.recordFrame(valid, now) == DeadlineWatchdog::Result::ProcessingTooSlow) deadlineFailure_.store(true, std::memory_order_release);
+        recordResultForTest(valid, now);
         if (valid) {
             mixer_.process(frame, enhanced_.data(), enhanced_.data(), enhanced_.size());
             (void)output_.write(enhanced_.data(), enhanced_.size());
@@ -24,9 +24,10 @@ void VoiceWorker::processAvailable() noexcept {
     });
 }
 
-void VoiceWorker::reset() noexcept { filter_.reset(); }
+void VoiceWorker::reset() noexcept { filter_.reset(); watchdog_ = DeadlineWatchdog{}; deadlineFailure_.store(false, std::memory_order_release); }
 void VoiceWorker::setFilterMode(int mode) noexcept { requestedMode_.store(mode, std::memory_order_relaxed); }
 bool VoiceWorker::takeDeadlineFailure() noexcept { return deadlineFailure_.exchange(false, std::memory_order_acq_rel); }
+void VoiceWorker::recordResultForTest(bool valid, std::int64_t timestampMillis) noexcept { if (watchdog_.recordFrame(valid, timestampMillis) == DeadlineWatchdog::Result::ProcessingTooSlow) deadlineFailure_.store(true, std::memory_order_release); }
 
 void renderMonoToOutput(SpscRingBuffer<float>& source, float* output, std::size_t frames,
                         std::size_t channelCount) noexcept {

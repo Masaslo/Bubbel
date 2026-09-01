@@ -19,6 +19,7 @@ void AudioEngine::FilterAdapter::reset() noexcept { (void)filter_.reset(); }
 
 bool AudioEngine::start(int filterMode, int /*inputPreference*/, float outputGain) {
     std::lock_guard<std::mutex> lock(controlMutex_);
+    manualStop_ = false;
     if (running_) return true;
     pushEvent(AudioEventKind::Starting);
     setFilterMode(filterMode); outputGain_ = outputGain;
@@ -32,6 +33,7 @@ bool AudioEngine::start(int filterMode, int /*inputPreference*/, float outputGai
     return true;
 }
 void AudioEngine::stop() {
+    manualStop_ = true;
     running_ = false;
     if (workerThread_.joinable()) workerThread_.join();
     if (recoveryThread_.joinable() && recoveryThread_.get_id() != std::this_thread::get_id()) recoveryThread_.join();
@@ -40,6 +42,8 @@ void AudioEngine::stop() {
 }
 void AudioEngine::setFilterMode(int mode) noexcept { worker_.setFilterMode(mode); }
 std::optional<AudioEvent> AudioEngine::pollEvent() {
+    if (recoveryRequested_.exchange(false) && !manualStop_) recover();
+    if (terminalFailure_.exchange(false)) { stop(); pushEvent(AudioEventKind::Failed, 0, "audio callback capacity exceeded"); }
     if (inputDrops_.exchange(0, std::memory_order_acq_rel) != 0) pushEvent(AudioEventKind::Recovering, 0, "input queue overflow");
     if (worker_.takeDeadlineFailure()) pushEvent(AudioEventKind::Failed, 0, "model deadline exceeded");
     std::lock_guard<std::mutex> lock(eventMutex_);
@@ -72,6 +76,8 @@ bool AudioEngine::openStreams() {
         if (in.openStream(inputStream_) != oboe::Result::OK) { outputStream_->close(); outputStream_.reset(); return false; }
     }
     if (outputStream_->requestStart() != oboe::Result::OK || inputStream_->requestStart() != oboe::Result::OK) { closeStreams(); return false; }
+    inputConverter_ = std::make_unique<RateConverter>(inputStream_->getSampleRate(), 48000);
+    outputConverter_ = std::make_unique<RateConverter>(48000, outputStream_->getSampleRate());
     return true;
 }
 void AudioEngine::closeStreams() { if (inputStream_) { inputStream_->requestStop(); inputStream_->close(); inputStream_.reset(); } if (outputStream_) { outputStream_->requestStop(); outputStream_->close(); outputStream_.reset(); } }
@@ -80,10 +86,10 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* stream, vo
     if (stream->getDirection() == oboe::Direction::Output) {
         auto* rendered = static_cast<float*>(audioData);
         const std::size_t sampleCount = static_cast<std::size_t>(frames) * static_cast<std::size_t>(outputChannels_);
-        const int routeRate = stream->getSampleRate();
-        const std::size_t needed = std::min(modelOutput_.size(), static_cast<std::size_t>(std::ceil(static_cast<double>(frames) * 48000 / routeRate)));
+        const std::size_t needed = std::min(modelOutput_.size(), (static_cast<std::size_t>(frames) * 48000U + static_cast<std::size_t>(stream->getSampleRate()) - 1U) / static_cast<std::size_t>(stream->getSampleRate()));
         for (std::size_t i = 0; i < needed; ++i) { modelOutput_[i] = 0.0F; (void)output_.read(&modelOutput_[i], 1); }
-        const std::size_t converted = resampleMono(modelOutput_.data(), needed, 48000, convertedOutput_.data(), convertedOutput_.size(), routeRate);
+        std::size_t converted = 0;
+        if (!outputConverter_ || !outputConverter_->process(modelOutput_.data(), needed, convertedOutput_.data(), convertedOutput_.size(), &converted)) { terminalFailure_ = true; std::memset(rendered, 0, sampleCount * sizeof(float)); return oboe::DataCallbackResult::Continue; }
         for (std::size_t frame = 0; frame < static_cast<std::size_t>(frames); ++frame) {
             const float sample = frame < converted ? convertedOutput_[frame] : 0.0F;
             for (int channel = 0; channel < outputChannels_; ++channel) rendered[frame * outputChannels_ + channel] = sample;
@@ -95,11 +101,9 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* stream, vo
     const auto* source = static_cast<const float*>(audioData); const std::size_t channels = static_cast<std::size_t>(stream->getChannelCount());
     const std::size_t count = std::min<std::size_t>(static_cast<std::size_t>(frames), inputScratch_.size());
     for (std::size_t i = 0; i < count; ++i) { float sum = 0; for (std::size_t c = 0; c < channels; ++c) sum += source[i * channels + c]; inputScratch_[i] = sum / static_cast<float>(channels); }
-    const std::size_t converted = resampleMono(inputScratch_.data(), count, stream->getSampleRate(), convertedInput_.data(), convertedInput_.size(), 48000);
-    if (input_.write(convertedInput_.data(), converted) != converted) inputDrops_.fetch_add(1, std::memory_order_relaxed);
+    std::size_t converted = 0;
+    if (!inputConverter_ || !inputConverter_->process(inputScratch_.data(), count, convertedInput_.data(), convertedInput_.size(), &converted) || input_.write(convertedInput_.data(), converted) != converted) { inputDrops_.fetch_add(1, std::memory_order_relaxed); terminalFailure_ = true; }
     return oboe::DataCallbackResult::Continue;
 }
-void AudioEngine::onErrorAfterClose(oboe::AudioStream*, oboe::Result) {
-    if (!recovering_.exchange(true)) { if (recoveryThread_.joinable()) recoveryThread_.join(); recoveryThread_ = std::thread(&AudioEngine::recover, this); }
-}
+void AudioEngine::onErrorAfterClose(oboe::AudioStream*, oboe::Result) { if (!manualStop_) recoveryRequested_ = true; }
 void AudioEngine::recover() { running_ = false; if (workerThread_.joinable()) workerThread_.join(); closeStreams(); worker_.reset(); for (int attempt = 1; attempt <= 3; ++attempt) { pushEvent(AudioEventKind::Recovering, attempt); std::this_thread::sleep_for(std::chrono::milliseconds(recoveryDelayMillis(attempt))); if (openStreams()) { running_ = true; workerThread_ = std::thread(&AudioEngine::workerLoop, this); pushEvent(AudioEventKind::Running, outputStream_->getSampleRate()); recovering_ = false; return; } } pushEvent(AudioEventKind::Failed, 3, "audio recovery exhausted"); recovering_ = false; }
