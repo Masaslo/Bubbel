@@ -20,6 +20,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+
         externalNativeBuild {
             cmake {
                 arguments += "-DANDROID_STL=c++_shared"
@@ -65,7 +69,6 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.oboe)
-    implementation(libs.onnxruntime.android)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

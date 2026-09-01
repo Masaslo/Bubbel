@@ -50,16 +50,16 @@ void spscRingBufferWrapsWithoutOverwritingUnreadSamples() {
     EXPECT_TRUE(testName, ring.read(output.data(), 1U) == 0U);
 }
 
-void frameAssemblerEmitsContiguous512SampleFramesAcrossCallbacks() {
-    constexpr char testName[] = "frame assembler emits contiguous 512 sample frames across callbacks";
-    FrameAssembler<512> assembler;
-    std::array<float, 511> first = {};
-    std::array<float, 513> second = {};
+void frameAssemblerEmitsContiguous480SampleHopsAcrossCallbacks() {
+    constexpr char testName[] = "frame assembler emits contiguous 480 sample hops across callbacks";
+    FrameAssembler<480> assembler;
+    std::array<float, 479> first = {};
+    std::array<float, 481> second = {};
     for (std::size_t index = 0; index < first.size(); ++index) {
         first[index] = static_cast<float>(index);
     }
     for (std::size_t index = 0; index < second.size(); ++index) {
-        second[index] = static_cast<float>(511U + index);
+        second[index] = static_cast<float>(479U + index);
     }
 
     std::size_t frames = 0;
@@ -68,8 +68,8 @@ void frameAssemblerEmitsContiguous512SampleFramesAcrossCallbacks() {
         (void)frame;
     });
     assembler.append(second.data(), second.size(), [&](const float* frame) {
-        for (std::size_t index = 0; index < 512U; ++index) {
-            EXPECT_NEAR(testName, frame[index], static_cast<float>(frames * 512U + index), 0.0F);
+        for (std::size_t index = 0; index < 480U; ++index) {
+            EXPECT_NEAR(testName, frame[index], static_cast<float>(frames * 480U + index), 0.0F);
         }
         ++frames;
     });
@@ -130,7 +130,7 @@ void deadlineWatchdogFlagsThirdConsecutiveMissAnd250MillisecondInvalidOutput() {
 
 int main() {
     spscRingBufferWrapsWithoutOverwritingUnreadSamples();
-    frameAssemblerEmitsContiguous512SampleFramesAcrossCallbacks();
+    frameAssemblerEmitsContiguous480SampleHopsAcrossCallbacks();
     profileMixerUsesExactDryFloorEndpointsAnd2400SampleRamps();
     deadlineWatchdogFlagsThirdConsecutiveMissAnd250MillisecondInvalidOutput();
 
