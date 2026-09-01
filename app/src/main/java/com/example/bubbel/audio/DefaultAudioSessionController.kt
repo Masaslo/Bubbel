@@ -21,12 +21,14 @@ class DefaultAudioSessionController internal constructor(
     private val poller = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "BubbelAudioEvents").apply { isDaemon = true }
     }
+    private val nativeLock = Any()
     private var requestedRunning = false
     private var config = AudioSessionConfig()
+    private var lastRoute: AudioRoute? = null
     private var closed = false
 
     init {
-        nativeEngine.create()
+        synchronized(nativeLock) { nativeEngine.create() }
         routeMonitor.setRouteChangedListener(::restartForRouteChange)
         routeMonitor.start()
         if (pollNativeEvents) {
@@ -34,37 +36,50 @@ class DefaultAudioSessionController internal constructor(
         }
     }
 
-    @Synchronized
     override fun start(config: AudioSessionConfig) {
-        check(!closed) { "Audio session controller is closed" }
-        if (requestedRunning) return
-        requestedRunning = true
-        this.config = config
-        mutableState.value = AudioSessionState.Starting
-        if (!nativeEngine.start(config)) mutableState.value = AudioSessionState.Failed("could not start audio engine")
+        synchronized(nativeLock) {
+            check(!closed) { "Audio session controller is closed" }
+            if (requestedRunning) return
+            requestedRunning = true
+            this.config = config
+            mutableState.value = AudioSessionState.Starting
+            routeMonitor.beginCommunication()
+            lastRoute = routeMonitor.currentRoute
+            if (!nativeEngine.start(config)) {
+                requestedRunning = false
+                routeMonitor.endCommunication()
+                mutableState.value = AudioSessionState.Failed("could not start audio engine")
+            }
+        }
     }
 
-    @Synchronized
     override fun stop() {
-        if (!requestedRunning) return
-        requestedRunning = false
-        nativeEngine.stop()
-        mutableState.value = AudioSessionState.Idle
+        synchronized(nativeLock) {
+            if (!requestedRunning || closed) return
+            requestedRunning = false
+            nativeEngine.stop()
+            routeMonitor.endCommunication()
+            mutableState.value = AudioSessionState.Idle
+        }
     }
 
-    @Synchronized
     override fun setFilterMode(mode: FilterMode) {
-        config = config.copy(filterMode = mode)
-        nativeEngine.setFilterMode(mode)
+        synchronized(nativeLock) {
+            if (closed) return
+            config = config.copy(filterMode = mode)
+            nativeEngine.setFilterMode(mode)
+        }
     }
 
-    @Synchronized
     private fun restartForRouteChange(route: AudioRoute) {
-        if (!requestedRunning || closed) return
-        nativeEngine.stop()
-        mutableState.value = AudioSessionState.Starting
-        if (!nativeEngine.start(config)) {
-            mutableState.value = AudioSessionState.Failed("could not restart audio engine for ${route.label}")
+        synchronized(nativeLock) {
+            if (!requestedRunning || closed || route == lastRoute) return
+            lastRoute = route
+            nativeEngine.stop()
+            mutableState.value = AudioSessionState.Starting
+            if (!nativeEngine.start(config)) {
+                mutableState.value = AudioSessionState.Failed("could not restart audio engine for ${route.label}")
+            }
         }
     }
 
@@ -75,27 +90,32 @@ class DefaultAudioSessionController internal constructor(
     }
 
     internal fun pollNextNativeEvent(): Boolean {
-        val event = nativeEngine.pollEvent() ?: return false
-        mutableState.value = when (event.substringBefore(':')) {
-            "Starting" -> AudioSessionState.Starting
-            "Running" -> AudioSessionState.Running(routeMonitor.currentRoute)
-            "Recovering" -> AudioSessionState.Recovering(event.substringAfter(':').toIntOrNull() ?: 0)
-            "Failed" -> AudioSessionState.Failed(event.substringAfter(':'))
-            "Stopped" -> AudioSessionState.Idle
-            else -> AudioSessionState.Failed("unknown native audio event: $event")
+        synchronized(nativeLock) {
+            if (closed) return false
+            val event = nativeEngine.pollEvent() ?: return false
+            mutableState.value = when (event.substringBefore(':')) {
+                "Starting" -> AudioSessionState.Starting
+                "Running" -> AudioSessionState.Running(routeMonitor.currentRoute).also { lastRoute = it.route }
+                "Recovering" -> AudioSessionState.Recovering(event.substringAfter(':').toIntOrNull() ?: 0)
+                "Failed" -> AudioSessionState.Failed(event.substringAfter(':'))
+                "Stopped" -> AudioSessionState.Idle
+                else -> AudioSessionState.Failed("unknown native audio event: $event")
+            }
+            return true
         }
-        return true
     }
 
-    @Synchronized
     override fun close() {
-        if (closed) return
-        closed = true
-        requestedRunning = false
         poller.shutdownNow()
-        routeMonitor.close()
-        nativeEngine.stop()
-        nativeEngine.destroy()
-        mutableState.value = AudioSessionState.Idle
+        synchronized(nativeLock) {
+            if (closed) return
+            closed = true
+            requestedRunning = false
+            routeMonitor.close()
+            nativeEngine.stop()
+            nativeEngine.destroy()
+            routeMonitor.endCommunication()
+            mutableState.value = AudioSessionState.Idle
+        }
     }
 }

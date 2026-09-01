@@ -47,5 +47,7 @@ interface RouteMonitor {
     val currentRoute: AudioRoute
     fun setRouteChangedListener(listener: (AudioRoute) -> Unit)
     fun start()
+    fun beginCommunication()
+    fun endCommunication()
     fun close()
 }
