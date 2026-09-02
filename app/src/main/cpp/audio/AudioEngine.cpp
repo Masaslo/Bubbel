@@ -3,14 +3,31 @@
 #include <chrono>
 #include <cstring>
 #include <android/asset_manager.h>
+#include <android/log.h>
+
+namespace {
+void logStreamResult(const char* operation, oboe::Result result) {
+    __android_log_print(result == oboe::Result::OK ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                        "BubbelAudio", "%s: %s", operation, oboe::convertToText(result));
+}
+}
 
 AudioEngine::AudioEngine(AAssetManager* assets) {
-    if (assets == nullptr) return;
-    AAsset* asset = AAssetManager_open(assets, "models/deepfilternet3/DeepFilterNet3_onnx.tar.gz", AASSET_MODE_BUFFER);
-    if (asset == nullptr) return;
+    if (assets == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, "BubbelAudio", "Model initialization: no asset manager");
+        return;
+    }
+    AAsset* asset = AAssetManager_open(assets, "models/deepfilternet3/DeepFilterNet3_onnx.bin", AASSET_MODE_BUFFER);
+    if (asset == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, "BubbelAudio", "Model initialization: archive asset missing");
+        return;
+    }
     const auto length = static_cast<std::size_t>(AAsset_getLength(asset));
     const auto* bytes = static_cast<const std::uint8_t*>(AAsset_getBuffer(asset));
-    modelReady_ = bytes != nullptr && filter_.initializeBytes(bytes, length) == FilterResult::Ok;
+    const auto result = bytes != nullptr ? filter_.initializeBytes(bytes, length) : FilterResult::ModelError;
+    modelReady_ = result == FilterResult::Ok;
+    __android_log_print(modelReady_ ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, "BubbelAudio",
+                        "Model initialization: result=%d bytes=%zu", static_cast<int>(result), length);
     AAsset_close(asset);
 }
 AudioEngine::~AudioEngine() { stop(); }
@@ -58,9 +75,13 @@ bool AudioEngine::openStreams() {
         ->setUsage(oboe::Usage::VoiceCommunication)->setContentType(oboe::ContentType::Speech)
         ->setPerformanceMode(oboe::PerformanceMode::LowLatency)->setSharingMode(oboe::SharingMode::Exclusive)
         ->setDataCallback(this)->setErrorCallback(this);
-    if (out.openStream(outputStream_) != oboe::Result::OK) {
+    auto result = out.openStream(outputStream_);
+    logStreamResult("open output exclusive", result);
+    if (result != oboe::Result::OK) {
         out.setSharingMode(oboe::SharingMode::Shared);
-        if (out.openStream(outputStream_) != oboe::Result::OK) return false;
+        result = out.openStream(outputStream_);
+        logStreamResult("open output shared", result);
+        if (result != oboe::Result::OK) return false;
     }
     outputChannels_ = outputStream_->getChannelCount();
     oboe::AudioStreamBuilder in;
@@ -68,12 +89,24 @@ bool AudioEngine::openStreams() {
        ->setInputPreset(oboe::InputPreset::VoiceCommunication)
        ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
        ->setSharingMode(oboe::SharingMode::Exclusive)->setDataCallback(this)->setErrorCallback(this);
-    if (in.openStream(inputStream_) != oboe::Result::OK) {
+    result = in.openStream(inputStream_);
+    logStreamResult("open input exclusive", result);
+    if (result != oboe::Result::OK) {
         in.setSharingMode(oboe::SharingMode::Shared);
-        if (in.openStream(inputStream_) != oboe::Result::OK) { outputStream_->close(); outputStream_.reset(); return false; }
+        result = in.openStream(inputStream_);
+        logStreamResult("open input shared", result);
+        if (result != oboe::Result::OK) { outputStream_->close(); outputStream_.reset(); return false; }
     }
     worker_.setRouteSampleRates(inputStream_->getSampleRate(), outputStream_->getSampleRate());
-    if (outputStream_->requestStart() != oboe::Result::OK || inputStream_->requestStart() != oboe::Result::OK) { closeStreamsLocked(); return false; }
+    result = outputStream_->requestStart();
+    logStreamResult("start output", result);
+    if (result != oboe::Result::OK) { closeStreamsLocked(); return false; }
+    result = inputStream_->requestStart();
+    logStreamResult("start input", result);
+    if (result != oboe::Result::OK) { closeStreamsLocked(); return false; }
+    __android_log_print(ANDROID_LOG_INFO, "BubbelAudio", "streams started: input=%dHz/%dch output=%dHz/%dch",
+                        inputStream_->getSampleRate(), inputStream_->getChannelCount(),
+                        outputStream_->getSampleRate(), outputStream_->getChannelCount());
     return true;
 }
 void AudioEngine::closeStreamsLocked() { if (inputStream_) { inputStream_->requestStop(); inputStream_->close(); inputStream_.reset(); } if (outputStream_) { outputStream_->requestStop(); outputStream_->close(); outputStream_.reset(); } }

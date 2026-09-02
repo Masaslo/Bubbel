@@ -7,6 +7,7 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.Build
+import android.util.Log
 
 class AudioRouteMonitor(
     context: Context,
@@ -51,6 +52,8 @@ class AudioRouteMonitor(
         refreshCommunicationDevice()
     }
 
+    override fun refreshCommunication() = refreshCommunicationDevice()
+
     override fun endCommunication() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice()
         selectedDeviceId = null
@@ -70,8 +73,9 @@ class AudioRouteMonitor(
         handler.removeCallbacksAndMessages(null)
         handler.postDelayed({
             if (!closed) {
-                refreshCommunicationDevice()
-                onRouteChanged(currentRoute)
+                // The Android callback is on main; only hand off the notification.
+                // The controller serializes the subsequent device query/restart on BubbelAudioControl.
+                onRouteChanged(AudioRoute.Other)
             }
         }, ROUTE_SETTLE_MILLIS)
     }
@@ -87,9 +91,14 @@ class AudioRouteMonitor(
     private fun refreshCommunicationDevice() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || modeBeforeSession == null) return
         val devices = audioManager.availableCommunicationDevices
-        val selected = selectCommunicationDevice(devices, inputPreference) ?: return
+        val selected = selectCommunicationDevice(devices, inputPreference) ?: run {
+            Log.w("BubbelAudio", "No communication device available")
+            return
+        }
         if (audioManager.communicationDevice?.id != selected.id) {
-            if (audioManager.setCommunicationDevice(selected)) selectedDeviceId = selected.id
+            val accepted = audioManager.setCommunicationDevice(selected)
+            Log.i("BubbelAudio", "Communication device id=${selected.id} type=${selected.type}, request accepted=$accepted")
+            if (accepted) selectedDeviceId = selected.id
         } else {
             selectedDeviceId = selected.id
         }

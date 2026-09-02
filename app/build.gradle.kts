@@ -5,6 +5,15 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// AAPT transparently inflates .gz assets and strips their extension. libDF needs
+// the original gzip archive bytes, so package the pinned source as an opaque file.
+val prepareVoiceFilterAssets = tasks.register<Sync>("prepareVoiceFilterAssets") {
+    from("src/main/assets") {
+        rename("DeepFilterNet3_onnx.tar.gz", "DeepFilterNet3_onnx.bin")
+    }
+    into(layout.buildDirectory.dir("generated/voiceFilterAssets"))
+}
+
 android {
     namespace = "com.example.bubbel"
     compileSdk {
@@ -58,6 +67,7 @@ android {
         }
     }
     sourceSets {
+        getByName("main").assets.setSrcDirs(listOf(layout.buildDirectory.dir("generated/voiceFilterAssets")))
         getByName("main").jniLibs.directories.add(
             layout.buildDirectory.dir("generated/jniLibs").get().asFile.absolutePath,
         )
@@ -96,6 +106,9 @@ val buildLibDfArm64 = registerLibDfBuild("buildLibDfArm64", "arm64-v8a")
 val buildLibDfX86_64 = registerLibDfBuild("buildLibDfX86_64", "x86_64")
 
 tasks.configureEach {
+    if (name.startsWith("merge") && name.endsWith("Assets")) {
+        dependsOn(prepareVoiceFilterAssets)
+    }
     if (name.startsWith("configureCMake") ||
         (name.startsWith("merge") && name.endsWith("JniLibFolders"))) {
         dependsOn(buildLibDfArm64, buildLibDfX86_64)
@@ -118,6 +131,13 @@ tasks.register("verifyVoiceFilterPackaging") {
     inputs.file(debugApk)
     doLast {
         ZipFile(debugApk.get().asFile).use { apk ->
+            val modelEntry = checkNotNull(apk.getEntry("assets/models/deepfilternet3/DeepFilterNet3_onnx.bin")) {
+                "Debug APK is missing the opaque model archive"
+            }
+            val expectedBytes = file("src/main/assets/models/deepfilternet3/DeepFilterNet3_onnx.tar.gz").readBytes()
+            check(apk.getInputStream(modelEntry).use { it.readBytes() }.contentEquals(expectedBytes)) {
+                "Packaged model differs from the pinned gzip archive"
+            }
             listOf(
                 "lib/arm64-v8a/libbubbel_libdf.so",
                 "lib/x86_64/libbubbel_libdf.so",

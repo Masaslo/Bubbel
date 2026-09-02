@@ -46,12 +46,16 @@ import androidx.compose.material.icons.outlined.Vibration
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +89,7 @@ import com.example.bubbel.audio.AudioRoute
 import com.example.bubbel.audio.AudioSessionState
 import com.example.bubbel.audio.DefaultAudioSessionController
 import com.example.bubbel.presentation.home.ListeningViewModel
+import com.example.bubbel.presentation.home.listeningUiState
 import com.example.bubbel.ui.theme.BubbelTheme
 
 class MainActivity : ComponentActivity() {
@@ -144,10 +149,16 @@ fun BubbelHomeScreen(
 ) {
     val state by listeningViewModel.state.collectAsState()
     val permissionDenied by listeningViewModel.permissionDenied.collectAsState()
-    val uiState = listeningViewModel.uiState
+    // Read Compose state here so engine updates also recompute the button visuals.
+    val uiState = listeningUiState(state, permissionDenied)
+    val snackbarHostState = remember { SnackbarHostState() }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var muteSounds by rememberSaveable { mutableStateOf(true) }
     var haptics by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.failureDescription) {
+        uiState.failureDescription?.let { snackbarHostState.showSnackbar("Luistermodus mislukt: $it") }
+    }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -169,6 +180,24 @@ fun BubbelHomeScreen(
                 }
             },
             modifier = Modifier.align(Alignment.Center)
+        )
+        if (state is AudioSessionState.Starting) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 24.dp)
+                    .size(22.dp)
+                    .semantics { contentDescription = "Luistermodus starten" },
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 3.dp,
+            )
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(24.dp),
         )
         uiState.route?.let { RouteStatus(route = it, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(top = 16.dp, start = 20.dp)) }
         SettingsButton(

@@ -53,6 +53,57 @@ class BubbelHomeScreenTest {
     }
 
     @Test
+    fun bubbleTracksRecoveryAndFailureWithoutAnotherTap() {
+        val controller = ScreenTestController().apply {
+            state.value = AudioSessionState.Running(AudioRoute.Wired)
+        }
+        val viewModel = ListeningViewModel(controller)
+        composeRule.setContent {
+            BubbelTheme { BubbelHomeScreen(viewModel, viewModel::start) }
+        }
+
+        composeRule.onNodeWithTag("bubble_toggle").assertIsSelected()
+        composeRule.runOnIdle {
+            controller.state.value = AudioSessionState.Recovering(1)
+        }
+        composeRule.onNodeWithTag("bubble_toggle")
+            .assertIsNotSelected()
+            .assert(hasContentDescription("Luistermodus herstellen"))
+
+        composeRule.runOnIdle {
+            controller.state.value = AudioSessionState.Running(AudioRoute.Bluetooth)
+        }
+        composeRule.onNodeWithTag("bubble_toggle")
+            .assertIsSelected()
+            .assert(hasContentDescription("Luistermodus aan via ${AudioRoute.Bluetooth.label}"))
+        composeRule.onNodeWithTag("audio_route_status")
+            .assertExists()
+
+        composeRule.runOnIdle {
+            controller.state.value = AudioSessionState.Failed("stream disconnected")
+        }
+        composeRule.onNodeWithTag("bubble_toggle")
+            .assertIsNotSelected()
+            .assert(hasContentDescription("Luistermodus mislukt: stream disconnected"))
+        composeRule.onNodeWithTag("audio_route_status").assertDoesNotExist()
+    }
+
+    @Test
+    fun permissionDenialUpdatesTheBubbleWithoutAControllerStateChange() {
+        val viewModel = ListeningViewModel(ScreenTestController())
+        composeRule.setContent {
+            BubbelTheme { BubbelHomeScreen(viewModel, viewModel::start) }
+        }
+
+        composeRule.onNodeWithTag("bubble_toggle").assertIsNotSelected()
+        composeRule.runOnIdle { viewModel.onPermissionDenied() }
+        composeRule.onNodeWithTag("bubble_toggle")
+            .assertIsNotSelected()
+            .assert(hasContentDescription("Luistermodus mislukt: microfoonmachtiging geweigerd"))
+        composeRule.onNodeWithTag("audio_route_status").assertDoesNotExist()
+    }
+
+    @Test
     fun settingsControlIsAvailableForTalkBack() {
         val viewModel = ListeningViewModel(ScreenTestController())
         composeRule.setContent {

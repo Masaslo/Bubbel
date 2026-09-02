@@ -49,6 +49,7 @@ interface RouteMonitor {
     fun setRouteChangedListener(listener: (AudioRoute) -> Unit)
     fun start()
     fun beginCommunication(inputPreference: InputPreference = InputPreference.Automatic)
+    fun refreshCommunication() = Unit
     fun endCommunication()
     fun close()
 }
