@@ -25,6 +25,7 @@ class DefaultAudioSessionController internal constructor(
     private var requestedRunning = false
     private var config = AudioSessionConfig()
     private var lastRoute: AudioRoute? = null
+    private var lastRouteIdentity: String? = null
     private var closed = false
 
     init {
@@ -43,12 +44,12 @@ class DefaultAudioSessionController internal constructor(
             requestedRunning = true
             this.config = config
             mutableState.value = AudioSessionState.Starting
-            routeMonitor.beginCommunication()
+            routeMonitor.beginCommunication(config.inputPreference)
             lastRoute = routeMonitor.currentRoute
+            lastRouteIdentity = routeMonitor.routeIdentity
+            discardPendingNativeEvents()
             if (!nativeEngine.start(config)) {
-                requestedRunning = false
-                routeMonitor.endCommunication()
-                mutableState.value = AudioSessionState.Failed("could not start audio engine")
+                mutableState.value = failSession("could not start audio engine")
             }
         }
     }
@@ -57,7 +58,7 @@ class DefaultAudioSessionController internal constructor(
         synchronized(nativeLock) {
             if (!requestedRunning || closed) return
             requestedRunning = false
-            nativeEngine.stop()
+            stopNativeAndDiscardPendingEvents()
             routeMonitor.endCommunication()
             mutableState.value = AudioSessionState.Idle
         }
@@ -73,12 +74,13 @@ class DefaultAudioSessionController internal constructor(
 
     private fun restartForRouteChange(route: AudioRoute) {
         synchronized(nativeLock) {
-            if (!requestedRunning || closed || route == lastRoute) return
+            if (!requestedRunning || closed || routeMonitor.routeIdentity == lastRouteIdentity) return
             lastRoute = route
-            nativeEngine.stop()
+            lastRouteIdentity = routeMonitor.routeIdentity
+            stopNativeAndDiscardPendingEvents()
             mutableState.value = AudioSessionState.Starting
             if (!nativeEngine.start(config)) {
-                mutableState.value = AudioSessionState.Failed("could not restart audio engine for ${route.label}")
+                mutableState.value = failSession("could not restart audio engine for ${route.label}")
             }
         }
     }
@@ -95,14 +97,32 @@ class DefaultAudioSessionController internal constructor(
             val event = nativeEngine.pollEvent() ?: return false
             mutableState.value = when (event.substringBefore(':')) {
                 "Starting" -> AudioSessionState.Starting
-                "Running" -> AudioSessionState.Running(routeMonitor.currentRoute).also { lastRoute = it.route }
+                "Running" -> AudioSessionState.Running(routeMonitor.currentRoute).also {
+                    lastRoute = it.route
+                    lastRouteIdentity = routeMonitor.routeIdentity
+                }
                 "Recovering" -> AudioSessionState.Recovering(event.substringAfter(':').toIntOrNull() ?: 0)
-                "Failed" -> AudioSessionState.Failed(event.substringAfter(':'))
-                "Stopped" -> AudioSessionState.Idle
-                else -> AudioSessionState.Failed("unknown native audio event: $event")
+                "Failed" -> failSession(event.substringAfter(':'))
+                "Stopped" -> failSession("").let { AudioSessionState.Idle }
+                else -> failSession("unknown native audio event: $event")
             }
             return true
         }
+    }
+
+    private fun failSession(reason: String): AudioSessionState.Failed {
+        requestedRunning = false
+        routeMonitor.endCommunication()
+        return AudioSessionState.Failed(reason)
+    }
+
+    private fun stopNativeAndDiscardPendingEvents() {
+        nativeEngine.stop()
+        discardPendingNativeEvents()
+    }
+
+    private fun discardPendingNativeEvents() {
+        while (nativeEngine.pollEvent() != null) Unit
     }
 
     override fun close() {

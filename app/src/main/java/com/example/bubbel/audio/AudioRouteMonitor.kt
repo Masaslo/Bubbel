@@ -15,6 +15,8 @@ class AudioRouteMonitor(
     private val handler = Handler(Looper.getMainLooper())
     private var closed = false
     private var modeBeforeSession: Int? = null
+    private var inputPreference = InputPreference.Automatic
+    private var selectedDeviceId: Int? = null
     private var onRouteChanged: (AudioRoute) -> Unit = {}
     private val callback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) = notifyAfterSettling()
@@ -23,9 +25,16 @@ class AudioRouteMonitor(
 
     override val currentRoute: AudioRoute
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            audioManager.communicationDevice?.let { audioRouteForDeviceType(it.type) } ?: AudioRoute.Other
+            activeCommunicationDevice()?.let { audioRouteForDeviceType(it.type) } ?: AudioRoute.Other
         } else {
             legacyActiveRoute()
+        }
+
+    override val routeIdentity: String
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            activeCommunicationDevice()?.let { "${it.id}:${it.type}" } ?: "none"
+        } else {
+            "${currentRoute.type}:${currentRoute.label}"
         }
 
     override fun setRouteChangedListener(listener: (AudioRoute) -> Unit) {
@@ -34,13 +43,17 @@ class AudioRouteMonitor(
 
     override fun start() = audioManager.registerAudioDeviceCallback(callback, handler)
 
-    override fun beginCommunication() {
+    override fun beginCommunication(inputPreference: InputPreference) {
         if (modeBeforeSession != null) return
+        this.inputPreference = inputPreference
         modeBeforeSession = audioManager.mode
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        refreshCommunicationDevice()
     }
 
     override fun endCommunication() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice()
+        selectedDeviceId = null
         modeBeforeSession?.let { audioManager.mode = it }
         modeBeforeSession = null
     }
@@ -55,7 +68,31 @@ class AudioRouteMonitor(
 
     private fun notifyAfterSettling() {
         handler.removeCallbacksAndMessages(null)
-        handler.postDelayed({ if (!closed) onRouteChanged(currentRoute) }, ROUTE_SETTLE_MILLIS)
+        handler.postDelayed({
+            if (!closed) {
+                refreshCommunicationDevice()
+                onRouteChanged(currentRoute)
+            }
+        }, ROUTE_SETTLE_MILLIS)
+    }
+
+    private fun activeCommunicationDevice(): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        val devices = audioManager.availableCommunicationDevices
+        return audioManager.communicationDevice?.takeIf { active -> devices.any { it.id == active.id } }
+            ?: devices.firstOrNull { it.id == selectedDeviceId }
+            ?: selectCommunicationDevice(devices, inputPreference)
+    }
+
+    private fun refreshCommunicationDevice() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || modeBeforeSession == null) return
+        val devices = audioManager.availableCommunicationDevices
+        val selected = selectCommunicationDevice(devices, inputPreference) ?: return
+        if (audioManager.communicationDevice?.id != selected.id) {
+            if (audioManager.setCommunicationDevice(selected)) selectedDeviceId = selected.id
+        } else {
+            selectedDeviceId = selected.id
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -80,4 +117,17 @@ internal fun audioRouteForDeviceType(deviceType: Int): AudioRoute = when (device
     AudioDeviceInfo.TYPE_USB_ACCESSORY -> AudioRoute.Usb
     AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> AudioRoute.Speaker
     else -> AudioRoute.Other
+}
+
+internal fun preferredCommunicationRoute(routes: List<AudioRoute>, preference: InputPreference): AudioRoute =
+    when (preference) {
+        InputPreference.Phone -> routes.firstOrNull { it.type == AudioRouteType.Speaker }
+        InputPreference.Headset, InputPreference.Automatic -> routes.firstOrNull {
+            it.type == AudioRouteType.Wired || it.type == AudioRouteType.Usb || it.type == AudioRouteType.Bluetooth
+        }
+    } ?: routes.firstOrNull { it.type == AudioRouteType.Speaker } ?: routes.firstOrNull() ?: AudioRoute.Other
+
+private fun selectCommunicationDevice(devices: List<AudioDeviceInfo>, preference: InputPreference): AudioDeviceInfo? {
+    val preferredRoute = preferredCommunicationRoute(devices.map { audioRouteForDeviceType(it.type) }, preference)
+    return devices.firstOrNull { audioRouteForDeviceType(it.type) == preferredRoute }
 }

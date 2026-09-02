@@ -55,6 +55,7 @@ std::optional<AudioEvent> AudioEngine::pollEvent() {
 bool AudioEngine::openStreams() {
     oboe::AudioStreamBuilder out;
     out.setDirection(oboe::Direction::Output)->setFormat(oboe::AudioFormat::Float)
+        ->setUsage(oboe::Usage::VoiceCommunication)->setContentType(oboe::ContentType::Speech)
         ->setPerformanceMode(oboe::PerformanceMode::LowLatency)->setSharingMode(oboe::SharingMode::Exclusive)
         ->setDataCallback(this)->setErrorCallback(this);
     if (out.openStream(outputStream_) != oboe::Result::OK) {
@@ -64,14 +65,14 @@ bool AudioEngine::openStreams() {
     outputChannels_ = outputStream_->getChannelCount();
     oboe::AudioStreamBuilder in;
     in.setDirection(oboe::Direction::Input)->setFormat(oboe::AudioFormat::Float)
-       ->setSampleRate(outputStream_->getSampleRate())->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+       ->setInputPreset(oboe::InputPreset::VoiceCommunication)
+       ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
        ->setSharingMode(oboe::SharingMode::Exclusive)->setDataCallback(this)->setErrorCallback(this);
     if (in.openStream(inputStream_) != oboe::Result::OK) {
         in.setSharingMode(oboe::SharingMode::Shared);
         if (in.openStream(inputStream_) != oboe::Result::OK) { outputStream_->close(); outputStream_.reset(); return false; }
     }
-    if (inputStream_->getSampleRate() != outputStream_->getSampleRate()) { closeStreamsLocked(); return false; }
-    worker_.setRouteSampleRate(outputStream_->getSampleRate());
+    worker_.setRouteSampleRates(inputStream_->getSampleRate(), outputStream_->getSampleRate());
     if (outputStream_->requestStart() != oboe::Result::OK || inputStream_->requestStart() != oboe::Result::OK) { closeStreamsLocked(); return false; }
     return true;
 }

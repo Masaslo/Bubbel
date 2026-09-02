@@ -45,9 +45,10 @@ internal interface NativeAudioGateway {
 
 interface RouteMonitor {
     val currentRoute: AudioRoute
+    val routeIdentity: String get() = "${currentRoute.type}:${currentRoute.label}"
     fun setRouteChangedListener(listener: (AudioRoute) -> Unit)
     fun start()
-    fun beginCommunication()
+    fun beginCommunication(inputPreference: InputPreference = InputPreference.Automatic)
     fun endCommunication()
     fun close()
 }

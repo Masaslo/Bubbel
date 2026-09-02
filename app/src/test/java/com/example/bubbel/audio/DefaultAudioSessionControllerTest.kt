@@ -17,20 +17,18 @@ class DefaultAudioSessionControllerTest {
     }
     @Test
     fun mapsNativeEventsAndMakesStartStopIdempotent() {
-        val engine = FakeNativeAudioEngine(
-            mutableListOf(
-                "Starting:0",
-                "Running:48000",
-                "Recovering:2",
-                "Failed:audio recovery exhausted",
-                "Stopped:0",
-            ),
-        )
+        val events = mutableListOf<String>()
+        val engine = FakeNativeAudioEngine(events)
         val route = AudioRoute.Wired
         val controller = DefaultAudioSessionController(engine, FakeRouteMonitor(route), pollNativeEvents = false)
 
         controller.start()
         controller.start()
+        events += "Starting:0"
+        events += "Running:48000"
+        events += "Recovering:2"
+        events += "Failed:audio recovery exhausted"
+        events += "Stopped:0"
         controller.pollNextNativeEvent()
         assertEquals(AudioSessionState.Starting, controller.state.value)
         controller.pollNextNativeEvent()
@@ -46,7 +44,56 @@ class DefaultAudioSessionControllerTest {
         controller.stop()
 
         assertEquals(1, engine.startCount)
-        assertEquals(1, engine.stopCount)
+        assertEquals(0, engine.stopCount)
+    }
+
+    @Test
+    fun nativeFailureReleasesSessionSoRetryStartsAgain() {
+        val events = mutableListOf<String>()
+        val engine = FakeNativeAudioEngine(events)
+        val routes = FakeRouteMonitor(AudioRoute.Wired)
+        val controller = DefaultAudioSessionController(engine, routes, pollNativeEvents = false)
+
+        controller.start()
+        events += "Failed:audio recovery exhausted"
+        controller.pollNextNativeEvent()
+        controller.start()
+
+        assertEquals(2, engine.startCount)
+        assertEquals(1, routes.endCount)
+        assertEquals(AudioSessionState.Starting, controller.state.value)
+    }
+
+    @Test
+    fun queuedStoppedFromRouteRestartDoesNotStopTheReplacementSession() {
+        val events = mutableListOf<String>()
+        val engine = FakeNativeAudioEngine(events)
+        val routes = FakeRouteMonitor(AudioRoute.Wired)
+        val controller = DefaultAudioSessionController(engine, routes, pollNativeEvents = false)
+
+        controller.start()
+        events += "Stopped:0"
+        routes.notifyRouteChanged(AudioRoute.Speaker)
+        events += "Starting:0"
+        events += "Running:48000"
+        controller.pollNativeEvents()
+        controller.stop()
+
+        assertEquals(2, engine.startCount)
+        assertEquals(2, engine.stopCount)
+        assertEquals(AudioSessionState.Idle, controller.state.value)
+    }
+
+    @Test
+    fun prefersExternalCommunicationRoutesAndHonorsPhonePreference() {
+        assertEquals(
+            AudioRoute.Wired,
+            preferredCommunicationRoute(listOf(AudioRoute.Speaker, AudioRoute.Wired), InputPreference.Automatic),
+        )
+        assertEquals(
+            AudioRoute.Speaker,
+            preferredCommunicationRoute(listOf(AudioRoute.Wired, AudioRoute.Speaker), InputPreference.Phone),
+        )
     }
 
     @Test
@@ -87,13 +134,22 @@ private class FakeNativeAudioEngine(
 }
 
 private class FakeRouteMonitor(
-    override val currentRoute: AudioRoute,
+    initialRoute: AudioRoute,
 ) : RouteMonitor {
-    override fun setRouteChangedListener(listener: (AudioRoute) -> Unit) = Unit
+    override var currentRoute = initialRoute
+    var endCount = 0
+    private var routeChangedListener: (AudioRoute) -> Unit = {}
+    override fun setRouteChangedListener(listener: (AudioRoute) -> Unit) {
+        routeChangedListener = listener
+    }
     override fun start() = Unit
-    override fun beginCommunication() = Unit
-    override fun endCommunication() = Unit
+    override fun beginCommunication(inputPreference: InputPreference) = Unit
+    override fun endCommunication() { endCount++ }
     override fun close() = Unit
+    fun notifyRouteChanged(route: AudioRoute) {
+        currentRoute = route
+        routeChangedListener(route)
+    }
 }
 
 private class BlockingNativeAudioEngine : NativeAudioGateway {

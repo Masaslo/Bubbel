@@ -27,7 +27,8 @@ public:
     void processAvailable() noexcept;
     void reset() noexcept;
     void setFilterMode(int mode) noexcept;
-    void setRouteSampleRate(int sampleRate) noexcept;
+    void setRouteSampleRate(int sampleRate) noexcept { setRouteSampleRates(sampleRate, sampleRate); }
+    void setRouteSampleRates(int inputRate, int outputRate) noexcept;
     bool takeDeadlineFailure() noexcept;
     bool deadlineFailed() const noexcept { return deadlineFailure_.load(std::memory_order_acquire); }
     void recordResultForTest(bool valid, std::int64_t timestampMillis) noexcept;
@@ -38,13 +39,15 @@ private:
     IVoiceFilter& filter_;
     FrameAssembler<480> assembler_;
     std::array<float, 1920> readBuffer_ = {};
-    std::array<float, 2304> modelInput_ = {}, routeOutput_ = {};
+    std::array<float, 2304> modelInput_ = {};
+    std::array<float, 8192> routeOutput_ = {};
     std::array<float, 480> enhanced_ = {};
     ProfileMixer mixer_{FilterProfile::Balanced};
     std::atomic<int> requestedMode_{1};
     DeadlineWatchdog watchdog_;
     std::atomic<bool> deadlineFailure_{false};
     RateConverter inputConverter_, outputConverter_;
+    std::size_t inputChunkSize_ = readBuffer_.size();
     std::atomic<bool> converterReady_{false};
 };
 

@@ -58,6 +58,30 @@ void workerFramesInputAndWritesOneHop() {
     expect(filter.calls == 1 && output.read(processed.data(), processed.size()) == 480, "worker writes exactly one hop");
     expect(processed[479] > 3 && processed[479] <= 6, "worker filters assembled hop");
 }
+void workerSupportsDistinctInputAndOutputRates() {
+    SpscRingBuffer<float> input(4096), output(4096);
+    DoublingFilter filter;
+    VoiceWorker worker(input, output, filter);
+    worker.setRouteSampleRates(24000, 44100);
+    std::array<float, 480> samples{};
+    std::array<float, 1000> converted{};
+    input.write(samples.data(), samples.size());
+    worker.processAvailable();
+    expect(filter.calls == 1 && output.read(converted.data(), converted.size()) > 0 && !worker.deadlineFailed(),
+           "worker converts between distinct input and output route rates");
+}
+void workerDrainsLowRateBacklogWithoutConverterCapacityFailure() {
+    // No output consumer runs here: retain all 23 generated 480-sample hops.
+    SpscRingBuffer<float> input(4096), output(48000);
+    DoublingFilter filter;
+    VoiceWorker worker(input, output, filter);
+    worker.setRouteSampleRates(8000, 48000);
+    std::array<float, 1920> samples{};
+    input.write(samples.data(), samples.size());
+    worker.processAvailable();
+    expect(filter.calls == 23 && !worker.deadlineFailed(),
+           "worker drains low-rate backlog in bounded conversion chunks");
+}
 
 void resetAndRetryUseFixedDelays() {
     SpscRingBuffer<float> input(1), output(1);
@@ -138,6 +162,8 @@ void recoveryRetriesCanRepeatAndManualStopCancelsWait() {
 int main() {
     outputSilencesUnderrunAndDuplicatesMono();
     workerFramesInputAndWritesOneHop();
+    workerSupportsDistinctInputAndOutputRates();
+    workerDrainsLowRateBacklogWithoutConverterCapacityFailure();
     resetAndRetryUseFixedDelays();
     resamplingPreservesEndpointsAcrossRates();
     workerStopsAfterThreeInvalidHops();
